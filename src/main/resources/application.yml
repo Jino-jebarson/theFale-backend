@@ -1,0 +1,42 @@
+spring:
+  application:
+    name: fale-backend
+  profiles:
+    active: dev
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 10MB
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: true
+
+server:
+  port: 8080
+  error:
+    include-stacktrace: never
+    include-message: always
+
+fale:
+  security:
+    jwt:
+      secret: ${JWT_SECRET:4f7d9a3b6e8c2a1f0d5b7e9a3c6f8b2d1e0a5c7b9d3f6a8b2c4e1f0d7b9a3c6e}
+      access-token-expiration-ms: ${JWT_ACCESS_TOKEN_EXPIRATION_MS:900000} # 15 minutes default, or e.g. 10000 (10s) for testing refresh
+      refresh-token-expiration-ms: 604800000 # 7 days
+      cookie-name: fale_refresh_token
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
+  storage:
+    type: ${STORAGE_TYPE:local}
+    local-dir: ${STORAGE_LOCAL_DIR:uploads}
+  auth:
+    dev-otp-enabled: ${DEV_OTP_ENABLED:true}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when-authorized

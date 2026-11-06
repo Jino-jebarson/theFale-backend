@@ -1,0 +1,3672 @@
+openapi: 3.0.3
+info:
+  title: FALE Healthcare Platform Backend API
+  description: >-
+    Production-grade, OWASP-aligned REST API for FALE Healthcare Platform.
+    Enforces strict persona boundaries (Healthcare Students, Graduate Clinicians,
+    Healthcare Facilities, and Compliance Administrators).
+    
+    MONEY CONVENTION:
+    All monetary amounts in request and response payloads are represented as
+    integer PAISE (1 INR = 100 paise) to eliminate floating-point precision errors.
+    
+    SECURITY & CSRF CONVENTION:
+    Access tokens (JWT, 15m) are transmitted via the Authorization header (Bearer token).
+    Refresh tokens (7d) are stored and transmitted exclusively via HttpOnly, Secure,
+    SameSite=Strict cookies ('fale_refresh_token'). Because API requests require
+    the Authorization header, CSRF attacks on data endpoints are inherently mitigated.
+    The refresh endpoint enforces SameSite=Strict and Origin verification.
+  version: 1.1.0
+
+servers:
+  - url: http://localhost:8080
+    description: Local Development Server
+  - url: https://api.thefale.com
+    description: Production Environment
+
+tags:
+  - name: Authentication
+    description: Public OTP auth for candidates/facilities, Password+MFA for Admins, token rotation, and logout
+  - name: Candidates
+    description: Candidate & Student profile management, KYC documents, CV export, and student upgrade requests
+  - name: Jobs
+    description: Public & candidate job search, filters, internships, and applications
+  - name: Shifts
+    description: Locum shift dispatch marketplace, duty claiming, check-in, dispute, and cancellation
+  - name: Applications
+    description: Candidate application tracking and withdrawal
+  - name: Payouts
+    description: Escrow disbursements, bank account/UPI configuration, PDF payout slips
+  - name: Courses
+    description: CME & learning academy modules, progression, and certification
+  - name: Huddle
+    description: Clinical community posts, comments, questions, answers, and moderation flags
+  - name: Notifications
+    description: In-app real-time alerts and delivery
+  - name: Support
+    description: Help center tickets and clinical concierge
+  - name: Employer Dashboard
+    description: Facility staffing metrics and active roster coverage
+  - name: Employer Jobs & Shifts
+    description: Hospital job posting, shift dispatch with escrow lock, and shift completion confirmation
+  - name: Employer Applications
+    description: Applicant review pipeline and interview scheduling
+  - name: Employer Talent Resdex
+    description: Candidate discovery with contact masking and credit-based unlocking
+  - name: Employer Wallet & Escrow
+    description: Nodal escrow balance, UTR top-up requests, credit purchases, and ledger
+  - name: Admin Compliance
+    description: Candidate KYC, Student Upgrades, Hospital Accreditation, Postings, and Huddle Moderation
+
+paths:
+  # ============================================================================
+  # PUBLIC CREDENTIAL VERIFICATION
+  # ============================================================================
+  /api/v1/verifications/{id}:
+    get:
+      tags: [Authentication]
+      summary: Public Verification Check by QR/ID
+      description: Returns masked verification badge for candidate or hospital accreditation.
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Verification badge details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerificationBadgeResponse'
+        '404':
+          description: Verification record not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  # ============================================================================
+  # AUTHENTICATION
+  # ============================================================================
+  /api/v1/auth/otp/send:
+    post:
+      tags: [Authentication]
+      summary: Request 6-digit OTP for Mobile or Email
+      description: >-
+        Public endpoint. Rate-limited to 3 requests per 15 minutes per IP/contact via Bucket4j.
+        Returns generic response to prevent phone/email enumeration.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendOtpRequest'
+      responses:
+        '200':
+          description: OTP dispatched if account exists or eligible for signup
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '429':
+          description: Rate limit exceeded (Too Many Requests)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/v1/auth/otp/verify:
+    post:
+      tags: [Authentication]
+      summary: Verify OTP and Obtain JWT Access Token
+      description: >-
+        Public endpoint. Sets rotating refresh token in HttpOnly, Secure, SameSite=Strict cookie.
+        Returns access token in response body.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyOtpRequest'
+      responses:
+        '200':
+          description: Successfully authenticated
+          headers:
+            Set-Cookie:
+              description: HttpOnly, Secure, SameSite=Strict refresh token cookie
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          description: Invalid or expired OTP
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/v1/auth/admin/login:
+    post:
+      tags: [Authentication]
+      summary: Admin Password Login (Initiates MFA)
+      description: Admin accounts only. Never self-signed-up. Requires MFA verification step.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminLoginRequest'
+      responses:
+        '200':
+          description: Password valid; MFA code required
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mfaRequired:
+                    type: boolean
+                    example: true
+                  mfaSessionToken:
+                    type: string
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/v1/auth/admin/mfa/verify:
+    post:
+      tags: [Authentication]
+      summary: Verify Admin TOTP MFA Code
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mfaSessionToken, totpCode]
+              properties:
+                mfaSessionToken:
+                  type: string
+                totpCode:
+                  type: string
+                  pattern: '^\d{6}$'
+      responses:
+        '200':
+          description: MFA verified; admin session issued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+
+  /api/v1/auth/refresh:
+    post:
+      tags: [Authentication]
+      summary: Rotate Refresh Token
+      description: >-
+        Reads refresh token from HttpOnly cookie. Issues new access token and rotates cookie.
+        Implements reuse detection.
+      security: []
+      responses:
+        '200':
+          description: Access token refreshed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          description: Invalid or revoked refresh token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/v1/auth/logout:
+    post:
+      tags: [Authentication]
+      summary: Invalidate Session and Clear Refresh Cookie
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Successfully logged out
+          headers:
+            Set-Cookie:
+              description: Clears refresh cookie with Max-Age=0
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  # ============================================================================
+  # CANDIDATE PROFILE & ONBOARDING (STUDENT & GRADUATE)
+  # ============================================================================
+  /api/v1/candidates/onboarding:
+    post:
+      tags: [Candidates]
+      summary: Submit Candidate / Student Onboarding Profile
+      description: >-
+        Role: ROLE_CANDIDATE. Takes phone/email from authenticated security principal.
+        Supports Student pathway (candidateLevel = STUDENT) and Graduate pathway (FRESHER | PROFESSIONAL).
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CandidateOnboardingRequest'
+      responses:
+        '200':
+          description: Profile submitted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CandidateProfileResponse'
+
+  /api/v1/candidates/me/profile:
+    get:
+      tags: [Candidates]
+      summary: Get Current Candidate / Student Profile
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Profile details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CandidateProfileResponse'
+    put:
+      tags: [Candidates]
+      summary: Update Profile (Bio, Specialty, City)
+      description: candidateLevel and council verification status are NOT editable by candidate.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CandidateUpdateProfileRequest'
+      responses:
+        '200':
+          description: Profile updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CandidateProfileResponse'
+
+  /api/v1/candidates/me/documents:
+    post:
+      tags: [Candidates]
+      summary: Upload Credential Document
+      description: Local storage in dev; private S3-compatible bucket in prod. Whitelisted mime types, max 5MB.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [documentType, file]
+              properties:
+                documentType:
+                  type: string
+                  enum: [COLLEGE_ID, BONAFIDE_CERTIFICATE, COUNCIL_REGISTRATION, DEGREE_CERTIFICATE, AADHAAR_KYC, RESUME]
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: Document uploaded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentItemResponse'
+
+  /api/v1/candidates/me/documents/{docId}:
+    delete:
+      tags: [Candidates]
+      summary: Delete an Uploaded Document
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: docId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Document deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/candidates/me/export-cv:
+    get:
+      tags: [Candidates]
+      summary: Export Standard NABH Clinical CV or Student Academic Portfolio (PDF)
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Streamed PDF document
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+
+  /api/v1/candidates/upgrade-request:
+    post:
+      tags: [Candidates]
+      summary: Request Student-to-Graduate Status Upgrade
+      description: >-
+        Candidate submits proof of graduation and council license.
+        Submitting resets kycStatus to PENDING and places the request into the Admin Upgrade Queue.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StudentUpgradeRequest'
+      responses:
+        '201':
+          description: Upgrade request queued for admin review
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  # ============================================================================
+  # JOBS & INTERNSHIPS
+  # ============================================================================
+  /api/v1/jobs:
+    get:
+      tags: [Jobs]
+      summary: Browse Approved Job & Internship Openings
+      description: If user has candidate_level = STUDENT, automatically restricted to internships only.
+      parameters:
+        - name: q
+          in: query
+          schema:
+            type: string
+            maxLength: 100
+        - name: city
+          in: query
+          schema:
+            type: string
+            maxLength: 50
+        - name: department
+          in: query
+          schema:
+            type: string
+            maxLength: 50
+        - name: employmentType
+          in: query
+          schema:
+            type: string
+            enum: [FULL_TIME, PART_TIME, CONTRACT, INTERNSHIP]
+        - name: internshipsOnly
+          in: query
+          schema:
+            type: boolean
+        - name: minSalaryPaise
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+      responses:
+        '200':
+          description: Paginated job list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobPageResponse'
+
+  /api/v1/jobs/{id}:
+    get:
+      tags: [Jobs]
+      summary: Get Job / Internship Details by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Job detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobDetailResponse'
+
+  /api/v1/jobs/{id}/apply:
+    post:
+      tags: [Jobs]
+      summary: Apply for a Job or Internship
+      description: Rejects students attempting to apply to non-internship clinical roles with HTTP 403.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '201':
+          description: Applied successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationResponse'
+        '403':
+          description: Active students cannot apply to independent clinical jobs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/v1/jobs/{id}/save:
+    post:
+      tags: [Jobs]
+      summary: Save a Job Posting
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Job saved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+    delete:
+      tags: [Jobs]
+      summary: Remove Job Posting from Saved List
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Job removed from saved list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  # ============================================================================
+  # LOCUM SHIFTS & CLAIMS LIFECYCLE
+  # ============================================================================
+  /api/v1/shifts:
+    get:
+      tags: [Shifts]
+      summary: Browse Available Locum Shifts
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: date
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: department
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+      responses:
+        '200':
+          description: Available shifts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShiftPageResponse'
+
+  /api/v1/shifts/{id}/claim:
+    post:
+      tags: [Shifts]
+      summary: Claim a Locum Shift Slot
+      description: >-
+        Restricted to verified Graduate Candidates (ROLE_CANDIDATE with candidate_level != STUDENT).
+        Students receive HTTP 403 Forbidden.
+        Pessimistic lock on the shift entity prevents double allocation.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Shift claimed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShiftClaimResponse'
+        '403':
+          description: Active students cannot take patient locum duties, or KYC unverified
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: Shift is fully booked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/v1/shifts/claims/{claimId}/check-in:
+    post:
+      tags: [Shifts]
+      summary: Candidate Checks In at Hospital Duty
+      description: Updates claim status to CHECKED_IN and stamps checked_in_at.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: claimId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Check-in recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShiftClaimResponse'
+
+  /api/v1/shifts/claims/{claimId}/cancel:
+    post:
+      tags: [Shifts]
+      summary: Candidate Cancels Shift Claim
+      description: Updates claim status to CANCELLED and returns slot to shift openings.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: claimId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  maxLength: 255
+      responses:
+        '200':
+          description: Shift claim cancelled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/shifts/claims/{claimId}/dispute:
+    post:
+      tags: [Shifts]
+      summary: Candidate Raises Shift Dispute
+      description: Marks claim as DISPUTED for admin investigation.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: claimId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  maxLength: 500
+      responses:
+        '200':
+          description: Dispute registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  # ============================================================================
+  # CANDIDATE APPLICATIONS
+  # ============================================================================
+  /api/v1/applications/me:
+    get:
+      tags: [Applications]
+      summary: List Candidate's Own Applications
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [ACTIVE, CLOSED, ALL]
+            default: ACTIVE
+      responses:
+        '200':
+          description: Applications list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ApplicationResponse'
+
+  /api/v1/applications/{id}/withdraw:
+    post:
+      tags: [Applications]
+      summary: Withdraw an Application
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WithdrawApplicationRequest'
+      responses:
+        '200':
+          description: Application withdrawn
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  # ============================================================================
+  # CANDIDATE EARNINGS & PAYOUTS
+  # ============================================================================
+  /api/v1/payouts/me:
+    get:
+      tags: [Payouts]
+      summary: Candidate Earnings & Payout Ledger
+      description: Monetary values reported in integer paise.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Earnings metrics and transactions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CandidateEarningsResponse'
+
+  /api/v1/payouts/me/method:
+    put:
+      tags: [Payouts]
+      summary: Configure Bank Account or UPI Payout Method
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CandidatePayoutMethodRequest'
+      responses:
+        '200':
+          description: Payout method updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/payouts/{payoutId}/slip:
+    get:
+      tags: [Payouts]
+      summary: Download Official Locum Payout Slip (PDF)
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: payoutId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Streamed PDF payout slip
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+
+  # ============================================================================
+  # CME LEARNING ACADEMY
+  # ============================================================================
+  /api/v1/courses:
+    get:
+      tags: [Courses]
+      summary: Browse CME Courses & Modules
+      parameters:
+        - name: category
+          in: query
+          schema:
+            type: string
+        - name: q
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Course catalog
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CourseSummaryResponse'
+
+  /api/v1/courses/{id}:
+    get:
+      tags: [Courses]
+      summary: Get Course Details & Outline
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Course details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CourseSummaryResponse'
+
+  /api/v1/courses/{id}/enroll:
+    post:
+      tags: [Courses]
+      summary: Enroll in Course
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Enrolled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/courses/{id}/progress:
+    post:
+      tags: [Courses]
+      summary: Update Course Lesson Progress
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [progressPercent]
+              properties:
+                progressPercent:
+                  type: integer
+                  minimum: 0
+                  maximum: 100
+      responses:
+        '200':
+          description: Progress saved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/courses/{id}/certificate:
+    post:
+      tags: [Courses]
+      summary: Generate and Issue CME Certificate
+      description: Verifies 100% course completion before signing certificate.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '201':
+          description: Certificate issued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  certificateRef:
+                    type: string
+                  issuedAt:
+                    type: string
+                    format: date-time
+
+  # ============================================================================
+  # CLINICAL COMMUNITY (HUDDLE)
+  # ============================================================================
+  /api/v1/huddle/posts:
+    get:
+      tags: [Huddle]
+      summary: List Community Discussions
+      parameters:
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [All, Thought, Experience, Case, Question, Update, Event]
+        - name: field
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+      responses:
+        '200':
+          description: Paginated posts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HuddlePostPageResponse'
+    post:
+      tags: [Huddle]
+      summary: Create Discussion Post or Case
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateHuddlePostRequest'
+      responses:
+        '201':
+          description: Post created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HuddlePostResponse'
+
+  /api/v1/huddle/posts/{id}/comments:
+    get:
+      tags: [Huddle]
+      summary: Get Comments on a Post
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Comments list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/HuddleCommentResponse'
+    post:
+      tags: [Huddle]
+      summary: Add a Clinical Comment
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content:
+                  type: string
+                  minLength: 2
+                  maxLength: 1000
+      responses:
+        '201':
+          description: Comment added
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HuddleCommentResponse'
+
+  /api/v1/huddle/questions:
+    get:
+      tags: [Huddle]
+      summary: List Mentor AMA Questions
+      responses:
+        '200':
+          description: Questions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/HuddleQuestionResponse'
+    post:
+      tags: [Huddle]
+      summary: Post a Question to Clinical Mentors
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [questionText, field]
+              properties:
+                questionText:
+                  type: string
+                  minLength: 10
+                  maxLength: 500
+                field:
+                  type: string
+      responses:
+        '201':
+          description: Question posted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HuddleQuestionResponse'
+
+  /api/v1/huddle/questions/{id}/answers:
+    post:
+      tags: [Huddle]
+      summary: Answer Mentor Question (Verified Clinicians Only)
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [answerText]
+              properties:
+                answerText:
+                  type: string
+                  minLength: 10
+                  maxLength: 2000
+      responses:
+        '201':
+          description: Answer posted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/huddle/posts/{id}/react:
+    post:
+      tags: [Huddle]
+      summary: Upvote a Post
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Reacted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  upvotes:
+                    type: integer
+
+  /api/v1/huddle/posts/{id}/flag:
+    post:
+      tags: [Huddle]
+      summary: Flag Post for Ethics or Patient PHI Violation
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  minLength: 5
+                  maxLength: 500
+      responses:
+        '200':
+          description: Flagged
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  # ============================================================================
+  # NOTIFICATIONS & SUPPORT
+  # ============================================================================
+  /api/v1/notifications:
+    get:
+      tags: [Notifications]
+      summary: Get User Notifications
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Notifications
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/NotificationItemResponse'
+
+  /api/v1/notifications/{id}/read:
+    patch:
+      tags: [Notifications]
+      summary: Mark Single Notification as Read
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Notification marked read
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/notifications/mark-all-read:
+    patch:
+      tags: [Notifications]
+      summary: Mark All Notifications Read
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: All marked read
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/support/tickets:
+    post:
+      tags: [Support]
+      summary: Create Support Inquiry / Concierge Ticket
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTicketRequest'
+      responses:
+        '201':
+          description: Ticket logged
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/support/tickets/me:
+    get:
+      tags: [Support]
+      summary: List Current User's Support Tickets
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Tickets list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SupportTicketResponse'
+
+  # ============================================================================
+  # EMPLOYER / FACILITY OPERATIONS
+  # ============================================================================
+  /api/v1/employer/onboarding:
+    post:
+      tags: [Employer Dashboard]
+      summary: Submit Facility Verification & Profile
+      description: Takes contact phone/email from authenticated security principal.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FacilityOnboardingRequest'
+      responses:
+        '200':
+          description: Profile submitted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/employer/profile:
+    get:
+      tags: [Employer Dashboard]
+      summary: Get Hospital Profile & Verification Details
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Hospital profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FacilityProfileResponse'
+    put:
+      tags: [Employer Dashboard]
+      summary: Update Hospital Profile (Bed counts, description, photo gallery)
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FacilityUpdateProfileRequest'
+      responses:
+        '200':
+          description: Profile updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FacilityProfileResponse'
+
+  /api/v1/employer/dashboard:
+    get:
+      tags: [Employer Dashboard]
+      summary: Facility Overview Dashboard KPIs
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Facility metrics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FacilityDashboardResponse'
+
+  /api/v1/employer/roster:
+    get:
+      tags: [Employer Dashboard]
+      summary: Get Live Shift Duty Roster Coverage
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Live shift coverage list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ShiftItemResponse'
+
+  /api/v1/employer/jobs:
+    post:
+      tags: [Employer Jobs & Shifts]
+      summary: Post Permanent / Contract Healthcare Job Opening
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateJobRequest'
+      responses:
+        '201':
+          description: Job created (pending approval)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobDetailResponse'
+
+  /api/v1/employer/shifts:
+    post:
+      tags: [Employer Jobs & Shifts]
+      summary: Dispatch Emergency Locum Shift with Escrow Allocation
+      description: >-
+        Requires Idempotency-Key header.
+        Server derives duty hours from startAt/endAt timestamps.
+        Locks required escrow amount atomically in a serializable transaction.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateShiftRequest'
+      responses:
+        '201':
+          description: Shift created and escrow committed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShiftItemResponse'
+        '400':
+          description: Insufficient escrow wallet balance or hourly rate below minimum
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/v1/employer/shifts/{id}/cancel:
+    post:
+      tags: [Employer Jobs & Shifts]
+      summary: Facility Cancels Shift
+      description: Cancels shift and automatically refunds locked escrow back to available balance via a ledger entry.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  maxLength: 255
+      responses:
+        '200':
+          description: Shift cancelled and escrow refunded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/employer/shifts/claims/{claimId}/confirm-completion:
+    post:
+      tags: [Employer Jobs & Shifts]
+      summary: Facility Confirms Shift Duty Completion
+      description: >-
+        Marks claim status as COMPLETED.
+        Releases committed escrow into a pending candidate payout ledger record.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: claimId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Shift confirmed completed; payout released
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/employer/shifts/claims/{claimId}/no-show:
+    post:
+      tags: [Employer Jobs & Shifts]
+      summary: Facility Marks Candidate as No-Show
+      description: Marks claim as NO_SHOW and refunds escrow hold to facility available balance.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: claimId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: No-show recorded; escrow refunded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/employer/shifts/claims/{claimId}/dispute:
+    post:
+      tags: [Employer Jobs & Shifts]
+      summary: Facility Raises Dispute on Shift
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: claimId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  maxLength: 500
+      responses:
+        '200':
+          description: Dispute logged for admin mediation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/employer/applications:
+    get:
+      tags: [Employer Applications]
+      summary: Pipeline of Candidates Applied to Hospital Postings
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: jobId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: stage
+          in: query
+          schema:
+            type: string
+            enum: [All, Screening, Shortlisted, Interview, Hired, Rejected]
+      responses:
+        '200':
+          description: Applicant pipeline
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EmployerApplicantResponse'
+
+  /api/v1/employer/applications/{id}/status:
+    put:
+      tags: [Employer Applications]
+      summary: Update Applicant Stage in Pipeline
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [Screening, Shortlisted, Interview, Hired, Rejected]
+      responses:
+        '200':
+          description: Stage updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/employer/applications/{id}/interview:
+    post:
+      tags: [Employer Applications]
+      summary: Schedule Candidate Interview
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [scheduledAt, locationOrLink]
+              properties:
+                scheduledAt:
+                  type: string
+                  format: date-time
+                locationOrLink:
+                  type: string
+                  maxLength: 255
+      responses:
+        '200':
+          description: Interview scheduled and notification dispatched
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/employer/candidates:
+    get:
+      tags: [Employer Talent Resdex]
+      summary: Search Verified Talent (Resdex)
+      description: Returns masked phone, email, and council registration number by default.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: role
+          in: query
+          schema:
+            type: string
+        - name: city
+          in: query
+          schema:
+            type: string
+        - name: verifiedOnly
+          in: query
+          schema:
+            type: boolean
+        - name: q
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Talent list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ResdexCandidateResponse'
+
+  /api/v1/employer/candidates/{candidateId}/unlock:
+    post:
+      tags: [Employer Talent Resdex]
+      summary: Unlock Candidate Contact with 1 Credit
+      description: Requires Idempotency-Key. Atomically debits 1 credit from wallet.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: candidateId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Candidate unlocked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResdexCandidateResponse'
+
+  /api/v1/employer/wallet:
+    get:
+      tags: [Employer Wallet & Escrow]
+      summary: Get Escrow Balances, Bank Account & Stats
+      description: All financial figures returned in integer paise.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Wallet summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FacilityWalletResponse'
+
+  /api/v1/employer/wallet/transactions:
+    get:
+      tags: [Employer Wallet & Escrow]
+      summary: Get Paginated Wallet Transactions Ledger
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Transactions ledger
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WalletTransactionResponse'
+
+  /api/v1/employer/wallet/topup:
+    post:
+      tags: [Employer Wallet & Escrow]
+      summary: Submit Escrow Wallet Top-Up via Bank UTR Reference
+      description: >-
+        Requires Idempotency-Key.
+        Enters PENDING_RECONCILIATION status awaiting admin reconciliation.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WalletTopupRequest'
+      responses:
+        '201':
+          description: Top-up logged
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/employer/credits/purchase:
+    post:
+      tags: [Employer Wallet & Escrow]
+      summary: Purchase Candidate Unlock Credits from Available Wallet Balance
+      description: Requires Idempotency-Key. Atomically debits available wallet balance and increments candidate credits.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [packageId]
+              properties:
+                packageId:
+                  type: string
+                  enum: [pkg_10, pkg_30, pkg_100]
+      responses:
+        '200':
+          description: Credits purchased successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FacilityWalletResponse'
+
+  /api/v1/employer/bank-account:
+    put:
+      tags: [Employer Wallet & Escrow]
+      summary: Configure Hospital Refund / Escrow Bank Account
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HospitalBankAccountRequest'
+      responses:
+        '200':
+          description: Bank account saved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  # ============================================================================
+  # ADMIN COMPLIANCE & OPERATIONS (ROLE_ADMIN)
+  # ============================================================================
+  /api/v1/admin/dashboard:
+    get:
+      tags: [Admin Compliance]
+      summary: Admin Master Control Telemetry
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: KPIs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminDashboardResponse'
+
+  /api/v1/admin/audit-logs:
+    get:
+      tags: [Admin Compliance]
+      summary: Immutable Platform Audit Trail
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: action
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Audit logs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AuditEventResponse'
+
+  /api/v1/admin/settings:
+    get:
+      tags: [Admin Compliance]
+      summary: Get Dynamic Platform Settings (e.g. Platform Fee %)
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Platform settings dictionary
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: string
+    put:
+      tags: [Admin Compliance]
+      summary: Update Platform Setting
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key, value]
+              properties:
+                key:
+                  type: string
+                value:
+                  type: string
+      responses:
+        '200':
+          description: Setting updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/admin/kyc/candidates:
+    get:
+      tags: [Admin Compliance]
+      summary: List Candidate & Student KYC Queue
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Queue
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AdminCandidateKycItem'
+
+  /api/v1/admin/kyc/candidates/{id}/verify:
+    put:
+      tags: [Admin Compliance]
+      summary: Approve Candidate or Student KYC
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Approved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/admin/kyc/candidates/{id}/reject:
+    put:
+      tags: [Admin Compliance]
+      summary: Reject Candidate KYC
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  minLength: 5
+                  maxLength: 500
+      responses:
+        '200':
+          description: Rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/admin/candidates/upgrade-requests:
+    get:
+      tags: [Admin Compliance]
+      summary: List Student-to-Graduate Upgrade Requests
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Upgrade requests queue
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StudentUpgradeItem'
+
+  /api/v1/admin/candidates/upgrade-requests/{id}/approve:
+    put:
+      tags: [Admin Compliance]
+      summary: Approve Student-to-Graduate Upgrade
+      description: Updates candidate_level to FRESHER or PROFESSIONAL and resets kycStatus to PENDING.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Upgraded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/admin/kyc/facilities:
+    get:
+      tags: [Admin Compliance]
+      summary: List Hospital Accreditation Approval Queue
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Pending hospital queue
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AdminFacilityKycItem'
+
+  /api/v1/admin/kyc/facilities/{id}/approve:
+    put:
+      tags: [Admin Compliance]
+      summary: Approve Hospital Accreditation
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Approved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/admin/kyc/facilities/{id}/reject:
+    put:
+      tags: [Admin Compliance]
+      summary: Reject Hospital Accreditation
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  minLength: 5
+                  maxLength: 500
+      responses:
+        '200':
+          description: Rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/admin/postings/pending:
+    get:
+      tags: [Admin Compliance]
+      summary: List Job & Shift Postings Pending Safety Screen
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Postings queue
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AdminJobApprovalItem'
+
+  /api/v1/admin/postings/{id}/approve:
+    post:
+      tags: [Admin Compliance]
+      summary: Approve Job Posting
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Published
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/admin/postings/{id}/reject:
+    post:
+      tags: [Admin Compliance]
+      summary: Reject Job Posting
+      description: Rejects job vacancy with mandatory reason.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  minLength: 5
+                  maxLength: 500
+      responses:
+        '200':
+          description: Posting rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/admin/shifts/pending:
+    get:
+      tags: [Admin Compliance]
+      summary: List Locum Shifts Awaiting Safety & Escrow Screen
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Pending shifts queue
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LocumShiftResponse'
+
+  /api/v1/admin/shifts/{id}/approve:
+    post:
+      tags: [Admin Compliance]
+      summary: Approve Locum Shift
+      description: Approves shift requirement and publishes it as OPEN for candidates to claim.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Shift approved and published
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/admin/shifts/{id}/reject:
+    post:
+      tags: [Admin Compliance]
+      summary: Reject Locum Shift with Escrow Refund
+      description: Rejects locum shift and automatically refunds committed escrow balance back to the facility's available balance.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                notes:
+                  type: string
+      responses:
+        '200':
+          description: Shift rejected and escrow refunded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/admin/shifts/claims/pending:
+    get:
+      tags: [Admin Compliance]
+      summary: List Shift Duty Claims Awaiting Admin Screening
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Pending claims queue
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ShiftClaimResponse'
+
+  /api/v1/admin/shifts/claims/{id}/screening:
+    patch:
+      tags: [Admin Compliance]
+      summary: Screen Shift Claim (APPROVE or REJECT)
+      description: When approved, claim status advances to CONFIRMED. When rejected, slot is restored to open shift.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action:
+                  type: string
+                  enum: [APPROVE, REJECT, SHORTLIST]
+                notes:
+                  type: string
+      responses:
+        '200':
+          description: Screening decision recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/admin/applications:
+    get:
+      tags: [Admin Compliance]
+      summary: System-Wide Application Oversight with Match Score
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Applications list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EmployerApplicantResponse'
+
+  /api/v1/admin/applications/{id}/screening:
+    patch:
+      tags: [Admin Compliance]
+      summary: Screen Candidate Application (SHORTLIST or REJECT)
+      description: Admin screens council credentials and qualification. Shortlisting forwards candidate to hospital pipeline.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action:
+                  type: string
+                  enum: [SHORTLIST, REJECT]
+                notes:
+                  type: string
+      responses:
+        '200':
+          description: Screening decision recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/admin/applications/{id}/override:
+    put:
+      tags: [Admin Compliance]
+      summary: Compliance Intervention on an Application
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [newStatus, auditReason]
+              properties:
+                newStatus:
+                  type: string
+                auditReason:
+                  type: string
+                  minLength: 5
+                  maxLength: 500
+      responses:
+        '200':
+          description: Overridden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/admin/wallet/topups:
+    get:
+      tags: [Admin Compliance]
+      summary: List Pending Manual UTR Wallet Top-Ups
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Topup reconciliation queue
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AdminWalletTopupItem'
+
+  /api/v1/admin/wallet/topups/{id}/reconcile:
+    put:
+      tags: [Admin Compliance]
+      summary: Reconcile & Credit Hospital Wallet Top-Up
+      description: Atomically credits hospital available balance and marks transaction COMPLETED.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Wallet credited
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/admin/payouts/pending:
+    get:
+      tags: [Admin Compliance]
+      summary: List Candidate Payouts Awaiting Bank Disbursement
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Payouts list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AdminPendingPayoutItem'
+
+  /api/v1/admin/payouts/{id}/mark-paid:
+    put:
+      tags: [Admin Compliance]
+      summary: Mark Candidate Payout as Disbursed with Bank UTR
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [utr]
+              properties:
+                utr:
+                  type: string
+                  pattern: '^[A-Z0-9]{12,22}$'
+      responses:
+        '200':
+          description: Payout marked disbursed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/admin/huddle/flagged:
+    get:
+      tags: [Admin Compliance]
+      summary: List Flagged Huddle Clinical Discussions
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Flagged posts queue
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/HuddlePostResponse'
+
+  /api/v1/admin/huddle/posts/{id}:
+    delete:
+      tags: [Admin Compliance]
+      summary: Soft-Delete Violating Clinical Post
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  maxLength: 500
+      responses:
+        '200':
+          description: Post deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/admin/huddle/users/{id}/moderation-status:
+    put:
+      tags: [Admin Compliance]
+      summary: Mute or Suspend User from Clinical Huddle
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status, reason]
+              properties:
+                status:
+                  type: string
+                  enum: [ACTIVE, MUTED, SUSPENDED]
+                reason:
+                  type: string
+                  maxLength: 500
+      responses:
+        '200':
+          description: User moderation status updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+# ==============================================================================
+# SCHEMAS
+# ==============================================================================
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    ApiResponse:
+      type: object
+      required: [success, message]
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: "Operation completed successfully"
+
+    ApiError:
+      type: object
+      required: [timestamp, status, error, message, path]
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        status:
+          type: integer
+          example: 400
+        error:
+          type: string
+          example: "Bad Request"
+        message:
+          type: string
+          example: "Validation failed"
+        path:
+          type: string
+          example: "/api/v1/shifts/123/claim"
+        correlationId:
+          type: string
+          format: uuid
+
+    SendOtpRequest:
+      type: object
+      properties:
+        phone:
+          type: string
+          pattern: '^[6-9]\d{9}$'
+          example: "9876543210"
+        email:
+          type: string
+          format: email
+          example: "doctor@hospital.com"
+        portal:
+          type: string
+          enum: [candidate, facility]
+          default: candidate
+
+    VerifyOtpRequest:
+      type: object
+      required: [otp]
+      properties:
+        phone:
+          type: string
+          pattern: '^[6-9]\d{9}$'
+        email:
+          type: string
+          format: email
+        otp:
+          type: string
+          pattern: '^\d{6}$'
+          example: "123456"
+
+    AdminLoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+
+    AuthResponse:
+      type: object
+      required: [accessToken, tokenType, expiresIn, user]
+      properties:
+        accessToken:
+          type: string
+        tokenType:
+          type: string
+          example: "Bearer"
+        expiresIn:
+          type: integer
+          example: 900
+        user:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            phone:
+              type: string
+            email:
+              type: string
+            role:
+              type: string
+              enum: [ROLE_CANDIDATE, ROLE_FACILITY, ROLE_ADMIN]
+            candidateLevel:
+              type: string
+              enum: [STUDENT, FRESHER, PROFESSIONAL]
+            onboarded:
+              type: boolean
+
+    VerificationBadgeResponse:
+      type: object
+      properties:
+        verificationId:
+          type: string
+          format: uuid
+        entityType:
+          type: string
+          enum: [CANDIDATE, FACILITY]
+        maskedName:
+          type: string
+          example: "Dr. A**** P****"
+        verified:
+          type: boolean
+        accreditationText:
+          type: string
+          example: "State Medical Council Registered"
+        verifiedAt:
+          type: string
+          format: date-time
+
+    CandidateOnboardingRequest:
+      type: object
+      required: [name, city, candidateLevel]
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 100
+        city:
+          type: string
+          maxLength: 50
+        candidateLevel:
+          type: string
+          enum: [STUDENT, FRESHER, PROFESSIONAL]
+        # Student fields
+        course:
+          type: string
+          maxLength: 100
+        college:
+          type: string
+          maxLength: 150
+        studyYear:
+          type: string
+          enum: ["1st year", "2nd year", "3rd year", "4th year", "Internship year"]
+        universityRegNo:
+          type: string
+          maxLength: 50
+        # Graduate fields
+        profession:
+          type: string
+          maxLength: 50
+        specialty:
+          type: string
+          maxLength: 100
+        qualification:
+          type: string
+          maxLength: 100
+        council:
+          type: string
+          maxLength: 100
+        regNumber:
+          type: string
+          maxLength: 50
+        regYear:
+          type: string
+          maxLength: 4
+        experienceYears:
+          type: string
+          maxLength: 30
+
+    CandidateProfileResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        phone:
+          type: string
+        email:
+          type: string
+        city:
+          type: string
+        candidateLevel:
+          type: string
+          enum: [STUDENT, FRESHER, PROFESSIONAL]
+        kycStatus:
+          type: string
+          enum: [PENDING, VERIFIED, REJECTED]
+        course:
+          type: string
+        college:
+          type: string
+        studyYear:
+          type: string
+        universityRegNo:
+          type: string
+        profession:
+          type: string
+        specialty:
+          type: string
+        qualification:
+          type: string
+        council:
+          type: string
+        regNumber:
+          type: string
+        profileCompleteness:
+          type: integer
+
+    CandidateUpdateProfileRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 100
+        city:
+          type: string
+          maxLength: 50
+        specialty:
+          type: string
+          maxLength: 100
+        bio:
+          type: string
+          maxLength: 1000
+
+    StudentUpgradeRequest:
+      type: object
+      required: [qualification, council, regNumber]
+      properties:
+        qualification:
+          type: string
+          maxLength: 100
+        council:
+          type: string
+          maxLength: 100
+        regNumber:
+          type: string
+          maxLength: 50
+
+    StudentUpgradeItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        candidateId:
+          type: string
+          format: uuid
+        candidateName:
+          type: string
+        college:
+          type: string
+        course:
+          type: string
+        qualification:
+          type: string
+        council:
+          type: string
+        regNumber:
+          type: string
+        submittedAt:
+          type: string
+          format: date-time
+
+    DocumentItemResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        documentType:
+          type: string
+        originalFileName:
+          type: string
+        verified:
+          type: boolean
+        uploadedAt:
+          type: string
+          format: date-time
+
+    JobPageResponse:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/JobDetailResponse'
+        totalElements:
+          type: integer
+        totalPages:
+          type: integer
+        number:
+          type: integer
+
+    JobDetailResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        org:
+          type: string
+        city:
+          type: string
+        dept:
+          type: string
+        type:
+          type: string
+        isInternship:
+          type: boolean
+        salaryMinPaise:
+          type: integer
+          example: 4500000
+        salaryMaxPaise:
+          type: integer
+          example: 6000000
+        openings:
+          type: integer
+        urgent:
+          type: boolean
+        match:
+          type: integer
+        description:
+          type: string
+        status:
+          type: string
+
+    CreateJobRequest:
+      type: object
+      required: [title, dept, openings, salaryMinPaise, salaryMaxPaise]
+      properties:
+        title:
+          type: string
+          minLength: 3
+          maxLength: 100
+        dept:
+          type: string
+          maxLength: 50
+        openings:
+          type: integer
+          minimum: 1
+          maximum: 100
+        employmentType:
+          type: string
+          enum: [FULL_TIME, PART_TIME, CONTRACT, INTERNSHIP]
+        salaryMinPaise:
+          type: integer
+          minimum: 1000000
+        salaryMaxPaise:
+          type: integer
+        description:
+          type: string
+          minLength: 20
+          maxLength: 5000
+
+    ShiftPageResponse:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/ShiftItemResponse'
+        totalElements:
+          type: integer
+
+    ShiftItemResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        org:
+          type: string
+        city:
+          type: string
+        startAt:
+          type: string
+          format: date-time
+        endAt:
+          type: string
+          format: date-time
+        hours:
+          type: integer
+          example: 12
+        ratePerHourPaise:
+          type: integer
+          example: 45000
+        surgeRatePerHourPaise:
+          type: integer
+          example: 5000
+        dept:
+          type: string
+        urgent:
+          type: boolean
+        openings:
+          type: integer
+        slotsClaimed:
+          type: integer
+        status:
+          type: string
+          enum: [PENDING_APPROVAL, OPEN, FILLED, CANCELLED, REJECTED, COMPLETED]
+
+    CreateShiftRequest:
+      type: object
+      required: [title, dept, startAt, endAt, ratePerHourPaise, openings]
+      properties:
+        title:
+          type: string
+          minLength: 3
+          maxLength: 100
+        dept:
+          type: string
+          maxLength: 50
+        startAt:
+          type: string
+          format: date-time
+        endAt:
+          type: string
+          format: date-time
+        ratePerHourPaise:
+          type: integer
+          minimum: 20000
+        surgeRatePerHourPaise:
+          type: integer
+          default: 0
+        surgeLabel:
+          type: string
+        urgent:
+          type: boolean
+        openings:
+          type: integer
+          minimum: 1
+          maximum: 20
+
+    ShiftClaimResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        shiftId:
+          type: string
+          format: uuid
+        candidateId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [CLAIMED, CHECKED_IN, COMPLETED, NO_SHOW, CANCELLED, DISPUTED]
+        claimedAt:
+          type: string
+          format: date-time
+        checkedInAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+        grossAmountPaise:
+          type: integer
+        platformFeePaise:
+          type: integer
+        tdsAmountPaise:
+          type: integer
+        netAmountPaise:
+          type: integer
+        payoutStatus:
+          type: string
+          enum: [IN_ESCROW, PENDING_DISBURSEMENT, DISBURSED, REFUNDED]
+
+    ApplicationResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        jobId:
+          type: string
+          format: uuid
+        jobTitle:
+          type: string
+        hospitalName:
+          type: string
+        status:
+          type: string
+          enum: [PENDING_SCREENING, SHORTLISTED, INTERVIEW, OFFERED, HIRED, REJECTED, WITHDRAWN]
+        appliedDate:
+          type: string
+
+    CandidateEarningsResponse:
+      type: object
+      properties:
+        totalDisbursedPaise:
+          type: integer
+        inEscrowPaise:
+          type: integer
+        payoutMethod:
+          type: object
+          properties:
+            type:
+              type: string
+              enum: [upi, bank]
+            upiId:
+              type: string
+            accountNumberMasked:
+              type: string
+            ifsc:
+              type: string
+            accountHolderName:
+              type: string
+            status:
+              type: string
+              enum: [Verified, Pending]
+        transactions:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                format: uuid
+              shiftTitle:
+                type: string
+              hospitalName:
+                type: string
+              hours:
+                type: integer
+              netAmountPaise:
+                type: integer
+              payoutDate:
+                type: string
+              status:
+                type: string
+              utr:
+                type: string
+
+    CandidatePayoutMethodRequest:
+      type: object
+      required: [type, accountHolderName]
+      properties:
+        type:
+          type: string
+          enum: [upi, bank]
+        upiId:
+          type: string
+          pattern: '^[\w.-]+@[\w.-]+$'
+        accountNumber:
+          type: string
+          minLength: 9
+          maxLength: 18
+        confirmAccountNumber:
+          type: string
+        ifsc:
+          type: string
+          pattern: '^[A-Z]{4}0[A-Z0-9]{6}$'
+        accountHolderName:
+          type: string
+          minLength: 2
+          maxLength: 100
+
+    CourseSummaryResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        category:
+          type: string
+        duration:
+          type: string
+        cmePoints:
+          type: integer
+        summary:
+          type: string
+        forStudents:
+          type: boolean
+
+    HuddlePostPageResponse:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/HuddlePostResponse'
+
+    HuddlePostResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        authorName:
+          type: string
+        authorRole:
+          type: string
+        authorLevel:
+          type: string
+          enum: [student, fresher, professional, hospital]
+        verified:
+          type: boolean
+        title:
+          type: string
+        body:
+          type: string
+        type:
+          type: string
+          enum: [Thought, Experience, Case, Question, Update, Event]
+        field:
+          type: string
+        upvotes:
+          type: integer
+        commentsCount:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+
+    HuddleCommentResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        authorName:
+          type: string
+        authorRole:
+          type: string
+        content:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    HuddleQuestionResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        authorName:
+          type: string
+        field:
+          type: string
+        questionText:
+          type: string
+        answersCount:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+
+    CreateHuddlePostRequest:
+      type: object
+      required: [title, body, type, field]
+      properties:
+        title:
+          type: string
+          minLength: 5
+          maxLength: 150
+        body:
+          type: string
+          minLength: 10
+          maxLength: 3000
+        type:
+          type: string
+          enum: [Thought, Experience, Case, Question, Update, Event]
+        field:
+          type: string
+          maxLength: 50
+
+    NotificationItemResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        message:
+          type: string
+        type:
+          type: string
+        read:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+
+    CreateTicketRequest:
+      type: object
+      required: [subject, description, category]
+      properties:
+        subject:
+          type: string
+          minLength: 5
+          maxLength: 150
+        description:
+          type: string
+          minLength: 10
+          maxLength: 2000
+        category:
+          type: string
+          enum: [ESCROW, KYC, SHIFT_DISPUTE, TECHNICAL]
+
+    SupportTicketResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        subject:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+        status:
+          type: string
+          enum: [OPEN, IN_PROGRESS, RESOLVED, CLOSED]
+        createdAt:
+          type: string
+          format: date-time
+
+    FacilityOnboardingRequest:
+      type: object
+      required: [contactPerson, hospitalName, type, city, state, beds, licenseNumber]
+      properties:
+        contactPerson:
+          type: string
+          minLength: 2
+          maxLength: 100
+        hospitalName:
+          type: string
+          minLength: 3
+          maxLength: 150
+        type:
+          type: string
+          maxLength: 50
+        city:
+          type: string
+          maxLength: 50
+        state:
+          type: string
+          maxLength: 50
+        beds:
+          type: integer
+          minimum: 1
+          maximum: 5000
+        licenseNumber:
+          type: string
+          maxLength: 50
+        nabhNumber:
+          type: string
+          maxLength: 50
+
+    FacilityProfileResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        hospitalName:
+          type: string
+        facilityType:
+          type: string
+        city:
+          type: string
+        state:
+          type: string
+        beds:
+          type: integer
+        icuBeds:
+          type: integer
+        licenseNumber:
+          type: string
+        nabhNumber:
+          type: string
+        kycStatus:
+          type: string
+        contactPerson:
+          type: string
+        contactPhone:
+          type: string
+        contactEmail:
+          type: string
+
+    FacilityUpdateProfileRequest:
+      type: object
+      properties:
+        beds:
+          type: integer
+        icuBeds:
+          type: integer
+        contactPerson:
+          type: string
+
+    FacilityDashboardResponse:
+      type: object
+      properties:
+        activeOpenings:
+          type: integer
+        shiftCoveragePercent:
+          type: integer
+        totalApplicants:
+          type: integer
+        escrowBalancePaise:
+          type: integer
+        lockedEscrowPaise:
+          type: integer
+
+    EmployerApplicantResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        candidateName:
+          type: string
+        candidateRole:
+          type: string
+        candidateCity:
+          type: string
+        jobId:
+          type: string
+          format: uuid
+        jobTitle:
+          type: string
+        matchScore:
+          type: integer
+        councilVerified:
+          type: boolean
+        status:
+          type: string
+          enum: [Screening, Shortlisted, Interview, Hired, Rejected]
+        appliedDate:
+          type: string
+
+    ResdexCandidateResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        role:
+          type: string
+        city:
+          type: string
+        experience:
+          type: string
+        verified:
+          type: boolean
+        isUnlocked:
+          type: boolean
+        phone:
+          type: string
+          description: "Masked as '+91 ••••• •••••' unless unlocked"
+        email:
+          type: string
+          description: "Masked as '•••••••@domain.com' unless unlocked"
+        regNumber:
+          type: string
+          description: "Masked as 'Reg #••••••••' unless unlocked"
+
+    FacilityWalletResponse:
+      type: object
+      properties:
+        escrowBalancePaise:
+          type: integer
+        lockedEscrowPaise:
+          type: integer
+        totalDisbursedPaise:
+          type: integer
+        candidateCredits:
+          type: integer
+        bankAccount:
+          type: object
+          properties:
+            bankName:
+              type: string
+            accountNumberMasked:
+              type: string
+            ifsc:
+              type: string
+            status:
+              type: string
+
+    WalletTransactionResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [topup, escrow_hold, disbursement, credit_purchase, standby_credit, refund]
+        title:
+          type: string
+        amountPaise:
+          type: integer
+        balanceAfterPaise:
+          type: integer
+        date:
+          type: string
+        status:
+          type: string
+        refNumber:
+          type: string
+        utr:
+          type: string
+
+    WalletTopupRequest:
+      type: object
+      required: [amountPaise, utr]
+      properties:
+        amountPaise:
+          type: integer
+          minimum: 100000
+          maximum: 100000000
+        utr:
+          type: string
+          pattern: '^[A-Z0-9]{12,22}$'
+
+    HospitalBankAccountRequest:
+      type: object
+      required: [bankName, accountNumber, confirmAccountNumber, ifsc, accountHolderName]
+      properties:
+        bankName:
+          type: string
+        accountNumber:
+          type: string
+          minLength: 9
+          maxLength: 18
+        confirmAccountNumber:
+          type: string
+        ifsc:
+          type: string
+          pattern: '^[A-Z]{4}0[A-Z0-9]{6}$'
+        accountHolderName:
+          type: string
+
+    AdminDashboardResponse:
+      type: object
+      properties:
+        totalClinicians:
+          type: integer
+        totalHospitals:
+          type: integer
+        activeShifts:
+          type: integer
+        escrowUnderManagementPaise:
+          type: integer
+        pendingDoctorKycCount:
+          type: integer
+        pendingHospitalKycCount:
+          type: integer
+        pendingPostApprovalsCount:
+          type: integer
+        pendingTopupsCount:
+          type: integer
+        flaggedHuddleCount:
+          type: integer
+
+    AuditEventResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        actorId:
+          type: string
+          format: uuid
+        action:
+          type: string
+        resourceType:
+          type: string
+        resourceId:
+          type: string
+        ipAddress:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    AdminCandidateKycItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        candidateLevel:
+          type: string
+          enum: [STUDENT, FRESHER, PROFESSIONAL]
+        profession:
+          type: string
+        qualification:
+          type: string
+        council:
+          type: string
+        regNumber:
+          type: string
+        college:
+          type: string
+        course:
+          type: string
+        studyYear:
+          type: string
+        universityRegNo:
+          type: string
+        status:
+          type: string
+          enum: [pending, verified, rejected]
+        submittedDate:
+          type: string
+
+    AdminFacilityKycItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        type:
+          type: string
+        city:
+          type: string
+        state:
+          type: string
+        beds:
+          type: integer
+        licenseNumber:
+          type: string
+        nabhNumber:
+          type: string
+        contactPerson:
+          type: string
+        contactPhone:
+          type: string
+        status:
+          type: string
+          enum: [pending, verified, rejected]
+        submittedDate:
+          type: string
+
+    AdminJobApprovalItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        org:
+          type: string
+        type:
+          type: string
+          enum: [job, shift]
+        dept:
+          type: string
+        compensation:
+          type: string
+        status:
+          type: string
+          enum: [pending, approved, rejected]
+        openings:
+          type: integer
+        submittedDate:
+          type: string
+
+    AdminWalletTopupItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        facilityId:
+          type: string
+          format: uuid
+        facilityName:
+          type: string
+        amountPaise:
+          type: integer
+        utr:
+          type: string
+        refNumber:
+          type: string
+        submittedAt:
+          type: string
+          format: date-time
+
+    AdminPendingPayoutItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        candidateId:
+          type: string
+          format: uuid
+        candidateName:
+          type: string
+        netAmountPaise:
+          type: integer
+        payoutMethod:
+          type: string
+        accountOrUpi:
+          type: string
+        shiftTitle:
+          type: string
+        completedAt:
+          type: string
+          format: date-time
+
+    WithdrawApplicationRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+          maxLength: 255
+          description: Optional explanation for withdrawing the active job application
+

@@ -1,0 +1,21 @@
+spring:
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  jpa:
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+
+zonky:
+  test:
+    database:
+      provider: zonky
+
+fale:
+  security:
+    jwt:
+      secret: 4f7d9a3b6e8c2a1f0d5b7e9a3c6f8b2d1e0a5c7b9d3f6a8b2c4e1f0d7b9a3c6e
+  auth:
+    dev-otp-enabled: true

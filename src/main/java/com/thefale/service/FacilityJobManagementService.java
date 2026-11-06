@@ -1,0 +1,440 @@
+package com.thefale.service;
+
+import com.thefale.dto.CandidateDocumentDto;
+import com.thefale.dto.JobApplicationDto;
+import com.thefale.dto.JobPostingDto;
+import com.thefale.dto.PostJobRequest;
+import com.thefale.dto.UpdateApplicationStatusRequest;
+import com.thefale.entity.*;
+import com.thefale.exception.BadRequestException;
+import com.thefale.exception.ForbiddenException;
+import com.thefale.exception.ResourceNotFoundException;
+import com.thefale.repository.*;
+import com.thefale.security.CustomUserPrincipal;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.util.List;
+import java.util.Set;
+import java.util.UUID;
+import java.util.stream.Collectors;
+
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class FacilityJobManagementService {
+
+    private final FacilityProfileRepository facilityProfileRepository;
+    private final FacilityService facilityService;
+    private final JobPostingRepository jobPostingRepository;
+    private final JobApplicationRepository jobApplicationRepository;
+    private final LocumShiftRepository locumShiftRepository;
+    private final ShiftClaimRepository shiftClaimRepository;
+    private final CandidateProfileRepository candidateProfileRepository;
+    private final UnlockedCandidateRepository unlockedCandidateRepository;
+    private final UserRepository userRepository;
+    private final CandidateDocumentRepository candidateDocumentRepository;
+    private final NotificationRepository notificationRepository;
+    private final AuditLogService auditLogService;
+
+    @Transactional
+    public JobPostingDto postJob(CustomUserPrincipal principal, PostJobRequest request) {
+        FacilityProfile facility = facilityService.getOrCreateFacilityProfile(principal);
+
+        if (request.getSalaryMinPaise() > request.getSalaryMaxPaise()) {
+            throw new BadRequestException("Minimum salary cannot exceed maximum salary");
+        }
+
+        BigDecimal minRupees = BigDecimal.valueOf(request.getSalaryMinPaise())
+                .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
+        BigDecimal maxRupees = BigDecimal.valueOf(request.getSalaryMaxPaise())
+                .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
+
+        JobPosting job = JobPosting.builder()
+                .facilityId(facility.getId())
+                .title(request.getTitle().trim())
+                .department(request.getDepartment().trim())
+                .employmentType(request.getEmploymentType().trim())
+                .internship(request.isInternship())
+                .city(request.getCity().trim())
+                .openings(request.getOpenings())
+                .salaryMin(minRupees)
+                .salaryMax(maxRupees)
+                .experienceRequired(request.getExperienceRequired())
+                .qualificationRequired(request.getQualificationRequired())
+                .description(request.getDescription().trim())
+                .status("PENDING_APPROVAL")
+                .build();
+
+        JobPosting saved = jobPostingRepository.save(job);
+        auditLogService.logEvent(principal.getId(), "JOB_POSTED", "JobPosting", saved.getId().toString(), null);
+
+        return mapPostingToDto(saved, facility);
+    }
+
+    @Transactional
+    public List<JobPostingDto> getMyJobs(CustomUserPrincipal principal) {
+        FacilityProfile facility = facilityService.getOrCreateFacilityProfile(principal);
+
+        return jobPostingRepository.findByFacilityIdAndDeletedAtIsNull(facility.getId()).stream()
+                .map(job -> mapPostingToDto(job, facility))
+                .collect(Collectors.toList());
+    }
+
+    @Transactional
+    public List<JobApplicationDto> getFacilityApplicants(CustomUserPrincipal principal, UUID jobId, String statusFilter) {
+        FacilityProfile facility = facilityService.getOrCreateFacilityProfile(principal);
+
+        List<JobPosting> facilityJobs;
+        if (jobId != null) {
+            JobPosting job = jobPostingRepository.findById(jobId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Job posting not found"));
+            if (!job.getFacilityId().equals(facility.getId())) {
+                throw new ForbiddenException("Unauthorized to view applicants for this job");
+            }
+            facilityJobs = List.of(job);
+        } else {
+            facilityJobs = jobPostingRepository.findByFacilityIdAndDeletedAtIsNull(facility.getId());
+        }
+
+        List<UUID> jobIds = facilityJobs.stream().map(JobPosting::getId).collect(Collectors.toList());
+        Set<String> allowedShortlistedStatuses = Set.of("SHORTLISTED", "INTERVIEW", "OFFER", "OFFERED", "HIRED", "REJECTED");
+
+        List<JobApplicationDto> results = new java.util.ArrayList<>(jobApplicationRepository.findByJobIdIn(jobIds).stream()
+                .filter(app -> allowedShortlistedStatuses.contains(app.getStatus().toUpperCase()))
+                .filter(app -> statusFilter == null || statusFilter.equalsIgnoreCase("All") || app.getStatus().equalsIgnoreCase(statusFilter))
+                .map(app -> {
+                    JobPosting job = facilityJobs.stream().filter(j -> j.getId().equals(app.getJobId())).findFirst().orElse(null);
+                    return mapApplicationToDto(app, job, facility.getId());
+                })
+                .collect(Collectors.toList()));
+
+        // Also include confirmed/shortlisted locum shift claims
+        if (jobId == null) {
+            List<LocumShift> facilityShifts = locumShiftRepository.findByFacilityIdOrderByStartAtDesc(facility.getId());
+            List<UUID> shiftIds = facilityShifts.stream().map(LocumShift::getId).collect(Collectors.toList());
+            if (!shiftIds.isEmpty()) {
+                Set<String> allowedShiftStatuses = Set.of("CONFIRMED", "CHECKED_IN", "COMPLETED", "CLAIMED");
+                List<JobApplicationDto> shiftApplicants = shiftClaimRepository.findByShiftIdIn(shiftIds).stream()
+                        .filter(claim -> allowedShiftStatuses.contains(claim.getStatus().toUpperCase()))
+                        .filter(claim -> statusFilter == null || statusFilter.equalsIgnoreCase("All")
+                                || claim.getStatus().equalsIgnoreCase(statusFilter)
+                                || (statusFilter.equalsIgnoreCase("SHORTLISTED") && ("CLAIMED".equalsIgnoreCase(claim.getStatus()) || "CONFIRMED".equalsIgnoreCase(claim.getStatus()))))
+                        .map(claim -> {
+                            LocumShift shift = facilityShifts.stream().filter(s -> s.getId().equals(claim.getShiftId())).findFirst().orElse(null);
+                            return mapShiftClaimToDto(claim, shift, facility.getId());
+                        })
+                        .collect(Collectors.toList());
+                results.addAll(shiftApplicants);
+            }
+        }
+
+        return results;
+    }
+
+    @Transactional
+    public JobApplicationDto updateApplicationStatus(CustomUserPrincipal principal, UUID applicationId, UpdateApplicationStatusRequest request) {
+        FacilityProfile facility = facilityService.getOrCreateFacilityProfile(principal);
+
+        java.util.Optional<ShiftClaim> shiftClaimOpt = shiftClaimRepository.findById(applicationId);
+        if (shiftClaimOpt.isPresent()) {
+            ShiftClaim claim = shiftClaimOpt.get();
+            LocumShift shift = locumShiftRepository.findById(claim.getShiftId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Shift not found"));
+            if (!shift.getFacilityId().equals(facility.getId())) {
+                throw new ForbiddenException("Unauthorized to manage shift claim for this facility");
+            }
+            if ("REJECTED".equalsIgnoreCase(request.getStatus())) {
+                claim.setStatus("REJECTED");
+                shiftClaimRepository.save(claim);
+            } else if ("CONFIRMED".equalsIgnoreCase(request.getStatus()) || "CONFIRM_SHIFT".equalsIgnoreCase(request.getStatus()) || "HIRED".equalsIgnoreCase(request.getStatus())) {
+                claim.setStatus("CONFIRMED");
+                shiftClaimRepository.save(claim);
+
+                CandidateProfile candidate = candidateProfileRepository.findById(claim.getCandidateId()).orElse(null);
+                if (candidate != null) {
+                    Notification notification = Notification.builder()
+                            .userId(candidate.getUserId())
+                            .title("Shift Confirmed: " + shift.getTitle())
+                            .message("Your slot for " + shift.getTitle() + " at " + facility.getHospitalName() + " has been confirmed.")
+                            .type("SHIFT")
+                            .actionUrl("/shifts")
+                            .read(false)
+                            .build();
+                    notificationRepository.save(notification);
+                }
+            }
+            return mapShiftClaimToDto(claim, shift, facility.getId());
+        }
+
+        JobApplication application = jobApplicationRepository.findById(applicationId)
+                .orElseThrow(() -> new ResourceNotFoundException("Application not found"));
+
+        JobPosting job = jobPostingRepository.findById(application.getJobId())
+                .orElseThrow(() -> new ResourceNotFoundException("Job posting not found"));
+
+        if (!job.getFacilityId().equals(facility.getId())) {
+            throw new ForbiddenException("Unauthorized to manage applications for this facility");
+        }
+
+        String currentStatus = application.getStatus().toUpperCase();
+        String targetStatus = request.getStatus().toUpperCase();
+        if ("INTERVIEW_SCHEDULED".equals(targetStatus)) {
+            targetStatus = "INTERVIEW";
+        }
+        if ("OFFER".equals(targetStatus)) {
+            targetStatus = "OFFERED";
+        }
+        if ("CONFIRMED".equals(targetStatus) || "CONFIRM_SHIFT".equals(targetStatus)) {
+            targetStatus = "HIRED";
+        }
+
+        // Strict Valid-Transition Checks:
+        // SHORTLISTED -> INTERVIEW, HIRED, REJECTED
+        // INTERVIEW -> OFFERED, HIRED, REJECTED
+        // OFFERED -> HIRED, REJECTED
+        boolean isValid = false;
+        if ("SHORTLISTED".equals(currentStatus)) {
+            isValid = "INTERVIEW".equals(targetStatus) || "REJECTED".equals(targetStatus) || "HIRED".equals(targetStatus);
+        } else if ("INTERVIEW".equals(currentStatus)) {
+            isValid = "OFFERED".equals(targetStatus) || "REJECTED".equals(targetStatus) || "HIRED".equals(targetStatus);
+        } else if ("OFFERED".equals(currentStatus)) {
+            isValid = "HIRED".equals(targetStatus) || "REJECTED".equals(targetStatus);
+        }
+
+        if (!isValid) {
+            throw new BadRequestException("Invalid status transition from " + currentStatus + " to " + targetStatus + ". Allowed progression: SHORTLISTED -> INTERVIEW -> OFFERED -> HIRED (or REJECTED at any stage).");
+        }
+
+        application.setStatus(targetStatus);
+        if (request.getInterviewScheduledAt() != null) {
+            application.setInterviewScheduledAt(request.getInterviewScheduledAt());
+        }
+        if (request.getNotes() != null) {
+            application.setInterviewLocationOrLink(request.getNotes());
+        }
+
+        JobApplication saved = jobApplicationRepository.save(application);
+
+        // When a candidate is hired for this role, close the job posting and close all other candidates' applications for this role
+        if ("HIRED".equalsIgnoreCase(targetStatus)) {
+            job.setStatus("CLOSED");
+            jobPostingRepository.save(job);
+
+            List<JobApplication> otherApps = jobApplicationRepository.findByJobId(job.getId());
+            for (JobApplication other : otherApps) {
+                if (!other.getId().equals(saved.getId()) && !"HIRED".equalsIgnoreCase(other.getStatus())) {
+                    other.setStatus("REJECTED");
+                    other.setWithdrawalReason("Position filled by another candidate");
+                    jobApplicationRepository.save(other);
+
+                    CandidateProfile otherCandidate = candidateProfileRepository.findById(other.getCandidateId()).orElse(null);
+                    if (otherCandidate != null) {
+                        Notification notif = Notification.builder()
+                                .userId(otherCandidate.getUserId())
+                                .title("Position Filled: " + job.getTitle())
+                                .message("The role of " + job.getTitle() + " at " + facility.getHospitalName() + " has been filled by another candidate.")
+                                .type("APPLICATION")
+                                .actionUrl("/applications")
+                                .read(false)
+                                .build();
+                        notificationRepository.save(notif);
+                    }
+                }
+            }
+        }
+
+        // Notify Candidate
+        CandidateProfile candidate = candidateProfileRepository.findById(application.getCandidateId()).orElse(null);
+        if (candidate != null) {
+            Notification notification = Notification.builder()
+                    .userId(candidate.getUserId())
+                    .title("Application Update: " + targetStatus)
+                    .message("Your application for " + job.getTitle() + " at " + facility.getHospitalName() + " has advanced to " + targetStatus + ".")
+                    .type("APPLICATION")
+                    .actionUrl("/applications")
+                    .read(false)
+                    .build();
+            notificationRepository.save(notification);
+        }
+
+        auditLogService.logEvent(principal.getId(), "APPLICATION_STATUS_UPDATED", "JobApplication", saved.getId().toString(), null);
+
+        return mapApplicationToDto(saved, job, facility.getId());
+    }
+
+    private JobPostingDto mapPostingToDto(JobPosting job, FacilityProfile facility) {
+        return JobPostingDto.builder()
+                .id(job.getId())
+                .facilityId(job.getFacilityId())
+                .facilityName(facility.getHospitalName())
+                .facilityCity(facility.getCity())
+                .city(job.getCity())
+                .title(job.getTitle())
+                .department(job.getDepartment())
+                .employmentType(job.getEmploymentType())
+                .internship(job.isInternship())
+                .openings(job.getOpenings())
+                .salaryMinPaise(job.getSalaryMin().multiply(BigDecimal.valueOf(100)).longValue())
+                .salaryMaxPaise(job.getSalaryMax().multiply(BigDecimal.valueOf(100)).longValue())
+                .experienceRequired(job.getExperienceRequired())
+                .qualificationRequired(job.getQualificationRequired())
+                .description(job.getDescription())
+                .status(job.getStatus())
+                .createdAt(job.getCreatedAt())
+                .build();
+    }
+
+    private JobApplicationDto mapApplicationToDto(JobApplication app, JobPosting job, UUID facilityId) {
+        CandidateProfile candidate = candidateProfileRepository.findById(app.getCandidateId()).orElse(null);
+        boolean isUnlocked = facilityId != null && candidate != null &&
+                (unlockedCandidateRepository.existsByFacilityIdAndCandidateId(facilityId, candidate.getId()) ||
+                 "HIRED".equalsIgnoreCase(app.getStatus()));
+
+        User user = (candidate != null && candidate.getUserId() != null) ? userRepository.findById(candidate.getUserId()).orElse(null) : null;
+
+        String phone;
+        String email;
+        if (isUnlocked && user != null) {
+            phone = user.getPhone();
+            email = user.getEmail() != null ? user.getEmail() : "candidate@fale.care";
+        } else {
+            phone = maskPhone(user != null ? user.getPhone() : "+919876543210");
+            email = maskEmail(user != null && user.getEmail() != null ? user.getEmail() : "candidate@fale.care");
+        }
+
+        List<CandidateDocument> docs = candidate != null ? candidateDocumentRepository.findByCandidateId(candidate.getId()) : List.of();
+        CandidateDocument resumeDoc = docs.stream()
+                .filter(d -> "RESUME".equalsIgnoreCase(d.getDocumentType()))
+                .findFirst()
+                .orElse(null);
+        String resumeUrl = resumeDoc != null ? resumeDoc.getFileUrl() : null;
+        String resumeFileName = resumeDoc != null ? resumeDoc.getOriginalFileName() : null;
+
+        List<CandidateDocumentDto> docDtos = docs.stream().map(d -> CandidateDocumentDto.builder()
+                .id(d.getId())
+                .documentType(d.getDocumentType())
+                .originalFileName(d.getOriginalFileName())
+                .fileUrl(d.getFileUrl())
+                .fileSizeBytes(d.getFileSizeBytes())
+                .mimeType(d.getMimeType())
+                .verified(d.isVerified())
+                .createdAt(d.getCreatedAt())
+                .build()).collect(Collectors.toList());
+
+        return JobApplicationDto.builder()
+                .id(app.getId())
+                .jobId(app.getJobId())
+                .jobTitle(job != null ? job.getTitle() : "Position")
+                .candidateId(app.getCandidateId())
+                .candidateName(candidate != null ? candidate.getName() : "Candidate")
+                .candidateRole(candidate != null ? (candidate.getProfession() != null ? candidate.getProfession() : candidate.getCourse()) : null)
+                .candidateCity(candidate != null ? candidate.getCity() : null)
+                .candidateExperience(candidate != null ? candidate.getExperienceYears() : null)
+                .councilVerified(candidate != null && "VERIFIED".equalsIgnoreCase(candidate.getKycStatus()))
+                .regNumber(candidate != null && candidate.getRegNumber() != null ? candidate.getRegNumber() : "Council Verified")
+                .candidateQualification(candidate != null ? candidate.getQualification() : null)
+                .candidateCouncil(candidate != null ? candidate.getCouncil() : null)
+                .candidateBio(candidate != null ? candidate.getBio() : null)
+                .candidateState(candidate != null ? candidate.getState() : null)
+                .candidatePhone(phone)
+                .candidateEmail(email)
+                .resumeUrl(resumeUrl)
+                .resumeFileName(resumeFileName)
+                .candidateDocuments(docDtos)
+                .status(app.getStatus())
+                .matchScore(app.getMatchScore())
+                .appliedAt(app.getAppliedAt())
+                .interviewScheduledAt(app.getInterviewScheduledAt())
+                .interviewLocationOrLink(app.getInterviewLocationOrLink())
+                .withdrawalReason(app.getWithdrawalReason())
+                .build();
+    }
+
+    private String maskPhone(String phone) {
+        if (phone == null || phone.length() < 7) {
+            return "+91 ***** *****";
+        }
+        return phone.substring(0, 5) + "*****" + phone.substring(phone.length() - 2);
+    }
+
+    private String maskEmail(String email) {
+        if (email == null || !email.contains("@")) {
+            return "c*****@fale.care";
+        }
+        String[] parts = email.split("@");
+        String name = parts[0];
+        String domain = parts[1];
+        String masked = name.length() > 2 ? name.charAt(0) + "*****" + name.charAt(name.length() - 1) : name.charAt(0) + "****";
+        return masked + "@" + domain;
+    }
+
+    private JobApplicationDto mapShiftClaimToDto(ShiftClaim claim, LocumShift shift, UUID facilityId) {
+        CandidateProfile candidate = candidateProfileRepository.findById(claim.getCandidateId()).orElse(null);
+        User user = (candidate != null && candidate.getUserId() != null) ? userRepository.findById(candidate.getUserId()).orElse(null) : null;
+
+        String phone = user != null && user.getPhone() != null ? user.getPhone() : "+91 ***** *****";
+        String email = user != null && user.getEmail() != null ? user.getEmail() : "candidate@fale.care";
+
+        String shiftStatus = claim.getStatus() != null ? claim.getStatus().toUpperCase() : "CLAIMED";
+        if ("REJECTED".equalsIgnoreCase(claim.getStatus())) {
+            shiftStatus = "REJECTED";
+        } else if ("CONFIRMED".equalsIgnoreCase(claim.getStatus())) {
+            shiftStatus = "CONFIRMED";
+        } else if ("COMPLETED".equalsIgnoreCase(claim.getStatus())) {
+            shiftStatus = "COMPLETED";
+        } else if ("CHECKED_IN".equalsIgnoreCase(claim.getStatus())) {
+            shiftStatus = "CHECKED_IN";
+        } else {
+            shiftStatus = "CLAIMED";
+        }
+
+        List<CandidateDocument> docs = candidate != null ? candidateDocumentRepository.findByCandidateId(candidate.getId()) : List.of();
+        CandidateDocument resumeDoc = docs.stream()
+                .filter(d -> "RESUME".equalsIgnoreCase(d.getDocumentType()))
+                .findFirst()
+                .orElse(null);
+        String resumeUrl = resumeDoc != null ? resumeDoc.getFileUrl() : null;
+        String resumeFileName = resumeDoc != null ? resumeDoc.getOriginalFileName() : null;
+
+        List<CandidateDocumentDto> docDtos = docs.stream().map(d -> CandidateDocumentDto.builder()
+                .id(d.getId())
+                .documentType(d.getDocumentType())
+                .originalFileName(d.getOriginalFileName())
+                .fileUrl(d.getFileUrl())
+                .fileSizeBytes(d.getFileSizeBytes())
+                .mimeType(d.getMimeType())
+                .verified(d.isVerified())
+                .createdAt(d.getCreatedAt())
+                .build()).collect(Collectors.toList());
+
+        return JobApplicationDto.builder()
+                .id(claim.getId())
+                .jobId(shift != null ? shift.getId() : null)
+                .jobTitle(shift != null ? shift.getTitle() + " (Locum Shift)" : "Locum Shift")
+                .candidateId(claim.getCandidateId())
+                .candidateName(candidate != null ? candidate.getName() : "Candidate")
+                .candidateRole(candidate != null ? (candidate.getProfession() != null ? candidate.getProfession() : "Clinician") : "Clinician")
+                .candidateCity(candidate != null ? candidate.getCity() : null)
+                .candidateExperience(candidate != null ? candidate.getExperienceYears() : null)
+                .councilVerified(candidate != null && "VERIFIED".equalsIgnoreCase(candidate.getKycStatus()))
+                .regNumber(candidate != null && candidate.getRegNumber() != null ? candidate.getRegNumber() : "Council Verified")
+                .candidateQualification(candidate != null ? candidate.getQualification() : null)
+                .candidateCouncil(candidate != null ? candidate.getCouncil() : null)
+                .candidateBio(candidate != null ? candidate.getBio() : null)
+                .candidateState(candidate != null ? candidate.getState() : null)
+                .candidatePhone(phone)
+                .candidateEmail(email)
+                .resumeUrl(resumeUrl)
+                .resumeFileName(resumeFileName)
+                .candidateDocuments(docDtos)
+                .status(shiftStatus)
+                .matchScore(96)
+                .appliedAt(claim.getClaimedAt())
+                .build();
+    }
+}
