@@ -2,16 +2,21 @@ package com.thefale.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.thefale.dto.FacilityDocumentDto;
+import com.thefale.dto.FacilityDocumentUploadRequest;
 import com.thefale.dto.FacilityOnboardingRequest;
 import com.thefale.dto.FacilityProfileDto;
 import com.thefale.dto.HospitalBankAccountDto;
 import com.thefale.dto.UpdateHospitalBankRequest;
+import com.thefale.entity.FacilityDocument;
 import com.thefale.entity.FacilityProfile;
 import com.thefale.entity.FacilityWallet;
 import com.thefale.entity.HospitalBankAccount;
 import com.thefale.entity.User;
+import com.thefale.exception.BadRequestException;
 import com.thefale.exception.ConflictException;
 import com.thefale.exception.ResourceNotFoundException;
+import com.thefale.repository.FacilityDocumentRepository;
 import com.thefale.repository.FacilityProfileRepository;
 import com.thefale.repository.FacilityWalletRepository;
 import com.thefale.repository.HospitalBankAccountRepository;
@@ -26,6 +31,8 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Collections;
 import java.util.List;
+import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -33,6 +40,7 @@ import java.util.List;
 public class FacilityService {
 
     private final FacilityProfileRepository facilityProfileRepository;
+    private final FacilityDocumentRepository facilityDocumentRepository;
     private final FacilityWalletRepository facilityWalletRepository;
     private final HospitalBankAccountRepository hospitalBankAccountRepository;
     private final UserRepository userRepository;
@@ -142,6 +150,23 @@ public class FacilityService {
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
         user.setOnboarded(true);
         userRepository.save(user);
+
+        // Record initial verification documents directly in PostgreSQL (exact candidate pattern!)
+        recordDocumentIfPresent(saved.getId(), "FACILITY_REGISTRATION", request.getFacilityRegistrationUrl(), request.getFacilityRegistrationFileName(), "Clinical_Establishment_License.pdf");
+        recordDocumentIfPresent(saved.getId(), "GST_CERTIFICATE", request.getGstCertificateUrl(), request.getGstCertificateFileName(), "GST_Certificate.pdf");
+        recordDocumentIfPresent(saved.getId(), "REPRESENTATIVE_AUTHORIZATION", request.getRepresentativeAuthorizationUrl(), request.getRepresentativeAuthorizationFileName(), "Representative_Authorization.pdf");
+        recordDocumentIfPresent(saved.getId(), "NABH_CERTIFICATE", request.getNabhCertificateUrl(), request.getNabhCertificateFileName(), "NABH_Accreditation.pdf");
+        recordDocumentIfPresent(saved.getId(), "FIRE_SAFETY", request.getFireSafetyClearanceUrl(), request.getFireSafetyClearanceFileName(), "Fire_Safety_Clearance.pdf");
+        recordDocumentIfPresent(saved.getId(), "POLLUTION_CONTROL", request.getPollutionControlClearanceUrl(), request.getPollutionControlClearanceFileName(), "Pollution_Control_Clearance.pdf");
+        recordDocumentIfPresent(saved.getId(), "BMW_AUTHORIZATION", request.getBiomedicalWasteClearanceUrl(), request.getBiomedicalWasteClearanceFileName(), "Biomedical_Waste_Authorization.pdf");
+
+        if (request.getDocuments() != null) {
+            for (FacilityDocumentUploadRequest d : request.getDocuments()) {
+                if (d != null && d.getFileUrl() != null && !d.getFileUrl().isBlank()) {
+                    recordDocumentIfPresent(saved.getId(), d.getDocumentType(), d.getFileUrl(), d.getOriginalFileName(), "Document.pdf");
+                }
+            }
+        }
 
         auditLogService.logEvent(principal.getId(), "FACILITY_ONBOARDED", "FacilityProfile", saved.getId().toString(),
                 null);
@@ -277,6 +302,26 @@ public class FacilityService {
     }
 
     public FacilityProfileDto mapToDto(FacilityProfile f) {
+        List<FacilityDocumentDto> docs = Collections.emptyList();
+        if (f.getId() != null) {
+            try {
+                docs = facilityDocumentRepository.findByFacilityId(f.getId()).stream()
+                        .map(d -> FacilityDocumentDto.builder()
+                                .id(d.getId())
+                                .documentType(d.getDocumentType())
+                                .originalFileName(d.getOriginalFileName())
+                                .fileUrl(d.getFileUrl())
+                                .fileSizeBytes(d.getFileSizeBytes())
+                                .mimeType(d.getMimeType())
+                                .verified(d.isVerified())
+                                .createdAt(d.getCreatedAt())
+                                .build())
+                        .collect(Collectors.toList());
+            } catch (Exception e) {
+                log.warn("Failed to load facility documents: {}", e.getMessage());
+            }
+        }
+
         return FacilityProfileDto.builder()
                 .id(f.getId())
                 .userId(f.getUserId())
@@ -303,11 +348,101 @@ public class FacilityService {
                 .hiringNeeds(jsonToList(f.getHiringNeeds()))
                 .logoUrl(f.getLogoUrl())
                 .facilityPhotos(jsonToList(f.getFacilityPhotos()))
+                .documents(docs)
                 .kycStatus(f.getKycStatus())
                 .kycNotes(f.getKycNotes())
                 .verifiedAt(f.getVerifiedAt())
                 .createdAt(f.getCreatedAt())
                 .build();
+    }
+
+    @Transactional
+    public FacilityDocumentDto recordFacilityDocument(CustomUserPrincipal principal, String documentType, String originalFileName, String fileUrl) {
+        FacilityProfile facility = getOrCreateFacilityProfile(principal);
+        if (fileUrl == null || fileUrl.isBlank()) {
+            throw new BadRequestException("File content / URL cannot be blank");
+        }
+
+        String lowerName = (originalFileName != null ? originalFileName : fileUrl).toLowerCase();
+        String mime = "application/pdf";
+        if (fileUrl.startsWith("data:application/pdf")) {
+            mime = "application/pdf";
+        } else if (fileUrl.startsWith("data:image/png")) {
+            mime = "image/png";
+        } else if (fileUrl.startsWith("data:image/jpeg") || fileUrl.startsWith("data:image/jpg")) {
+            mime = "image/jpeg";
+        } else if (fileUrl.startsWith("data:image/webp")) {
+            mime = "image/webp";
+        } else if (lowerName.endsWith(".jpg") || lowerName.endsWith(".jpeg")) {
+            mime = "image/jpeg";
+        } else if (lowerName.endsWith(".png")) {
+            mime = "image/png";
+        } else if (lowerName.endsWith(".webp")) {
+            mime = "image/webp";
+        }
+
+        long calculatedSize = 256000L;
+        if (fileUrl.startsWith("data:")) {
+            int commaIdx = fileUrl.indexOf(",");
+            if (commaIdx != -1) {
+                calculatedSize = (long) ((fileUrl.length() - commaIdx - 1) * 0.75);
+            }
+        }
+
+        facilityDocumentRepository.deleteByFacilityIdAndDocumentType(facility.getId(), documentType.toUpperCase());
+
+        FacilityDocument doc = FacilityDocument.builder()
+                .facilityId(facility.getId())
+                .documentType(documentType.toUpperCase())
+                .originalFileName(originalFileName != null && !originalFileName.isBlank() ? originalFileName : (documentType + ".pdf"))
+                .fileUrl(fileUrl)
+                .fileSizeBytes(calculatedSize)
+                .mimeType(mime)
+                .verified(false)
+                .build();
+
+        FacilityDocument saved = facilityDocumentRepository.save(doc);
+        auditLogService.logEvent(principal.getId(), "FACILITY_DOCUMENT_UPLOADED", "FacilityDocument", saved.getId().toString(), null);
+
+        return FacilityDocumentDto.builder()
+                .id(saved.getId())
+                .documentType(saved.getDocumentType())
+                .originalFileName(saved.getOriginalFileName())
+                .fileUrl(saved.getFileUrl())
+                .fileSizeBytes(saved.getFileSizeBytes())
+                .mimeType(saved.getMimeType())
+                .verified(saved.isVerified())
+                .createdAt(saved.getCreatedAt())
+                .build();
+    }
+
+    @Transactional(readOnly = true)
+    public List<FacilityDocumentDto> getFacilityDocuments(CustomUserPrincipal principal) {
+        FacilityProfile facility = getOrCreateFacilityProfile(principal);
+        return facilityDocumentRepository.findByFacilityId(facility.getId()).stream()
+                .map(d -> FacilityDocumentDto.builder()
+                        .id(d.getId())
+                        .documentType(d.getDocumentType())
+                        .originalFileName(d.getOriginalFileName())
+                        .fileUrl(d.getFileUrl())
+                        .fileSizeBytes(d.getFileSizeBytes())
+                        .mimeType(d.getMimeType())
+                        .verified(d.isVerified())
+                        .createdAt(d.getCreatedAt())
+                        .build())
+                .collect(Collectors.toList());
+    }
+
+    @Transactional
+    public void deleteFacilityDocument(CustomUserPrincipal principal, UUID documentId) {
+        FacilityProfile facility = getOrCreateFacilityProfile(principal);
+        FacilityDocument doc = facilityDocumentRepository.findById(documentId)
+                .orElseThrow(() -> new ResourceNotFoundException("Facility document not found"));
+        if (!doc.getFacilityId().equals(facility.getId())) {
+            throw new BadRequestException("Unauthorized access to facility document");
+        }
+        facilityDocumentRepository.delete(doc);
+        auditLogService.logEvent(principal.getId(), "FACILITY_DOCUMENT_DELETED", "FacilityDocument", documentId.toString(), null);
     }
 
     private String listToJson(List<String> list) {
@@ -330,6 +465,58 @@ public class FacilityService {
         } catch (Exception e) {
             log.warn("Failed to deserialize JSON to list", e);
             return Collections.emptyList();
+        }
+    }
+
+    private void recordDocumentIfPresent(UUID facilityId, String docType, String fileUrl, String fileName, String defaultName) {
+        if (fileUrl != null && !fileUrl.isBlank()) {
+            String resolvedName = (fileName != null && !fileName.isBlank()) ? fileName : defaultName;
+            String lowerName = resolvedName.toLowerCase();
+            String mime = "application/pdf";
+            if (fileUrl.startsWith("data:application/pdf")) {
+                mime = "application/pdf";
+            } else if (fileUrl.startsWith("data:image/png")) {
+                mime = "image/png";
+            } else if (fileUrl.startsWith("data:image/jpeg") || fileUrl.startsWith("data:image/jpg")) {
+                mime = "image/jpeg";
+            } else if (fileUrl.startsWith("data:image/webp")) {
+                mime = "image/webp";
+            } else if (lowerName.endsWith(".jpg") || lowerName.endsWith(".jpeg")) {
+                mime = "image/jpeg";
+            } else if (lowerName.endsWith(".png")) {
+                mime = "image/png";
+            } else if (lowerName.endsWith(".webp")) {
+                mime = "image/webp";
+            }
+
+            long calculatedSize = 256000L;
+            if (fileUrl.startsWith("data:")) {
+                int commaIdx = fileUrl.indexOf(",");
+                if (commaIdx != -1) {
+                    calculatedSize = (long) ((fileUrl.length() - commaIdx - 1) * 0.75);
+                }
+            }
+
+            // Remove previous version of this document type if re-onboarding
+            try {
+                facilityDocumentRepository.findByFacilityId(facilityId).stream()
+                        .filter(d -> docType.equalsIgnoreCase(d.getDocumentType()))
+                        .forEach(facilityDocumentRepository::delete);
+            } catch (Exception e) {
+                log.warn("Failed to clean up old facility documents: {}", e.getMessage());
+            }
+
+            FacilityDocument doc = FacilityDocument.builder()
+                    .facilityId(facilityId)
+                    .documentType(docType)
+                    .originalFileName(resolvedName)
+                    .fileUrl(fileUrl)
+                    .fileSizeBytes(calculatedSize > 0 ? calculatedSize : 256000L)
+                    .mimeType(mime)
+                    .verified(false)
+                    .build();
+
+            facilityDocumentRepository.save(doc);
         }
     }
 

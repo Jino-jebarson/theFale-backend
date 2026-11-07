@@ -55,6 +55,9 @@ public class ShiftClaim {
     @Column(name = "payout_slip_ref", length = 50)
     private String payoutSlipRef;
 
+    @Column(name = "actual_hours")
+    private Integer actualHours;
+
     @CreationTimestamp
     @Column(name = "claimed_at", nullable = false, updatable = false)
     private Instant claimedAt;

@@ -79,6 +79,16 @@ public class CandidateController {
         return ResponseEntity.ok(ApiResponse.success("Availability status updated successfully", profile));
     }
 
+    @GetMapping({"/me/payout-methods", "/payout-methods"})
+    @PreAuthorize("hasRole('CANDIDATE')")
+    @Operation(summary = "Get candidate payout destination bank account or UPI ID")
+    public ResponseEntity<ApiResponse<CandidatePayoutMethodDto>> getPayoutMethod(
+            @AuthenticationPrincipal CustomUserPrincipal principal
+    ) {
+        CandidatePayoutMethodDto method = candidateService.getPayoutMethod(principal);
+        return ResponseEntity.ok(ApiResponse.success(method));
+    }
+
     @PostMapping({"/me/payout-methods", "/payout-methods"})
     @PreAuthorize("hasRole('CANDIDATE')")
     @Operation(summary = "Save or update candidate payout bank account or UPI ID")
@@ -133,5 +143,26 @@ public class CandidateController {
     ) {
         String cvUrl = candidateService.exportCv(principal);
         return ResponseEntity.ok(ApiResponse.success("CV exported successfully", cvUrl));
+    }
+
+    @GetMapping({"/me/view-stats", "/view-stats"})
+    @PreAuthorize("hasRole('CANDIDATE')")
+    @Operation(summary = "Get dynamic institutional view analytics for candidate profile")
+    public ResponseEntity<ApiResponse<CandidateViewStatsDto>> getViewStats(
+            @AuthenticationPrincipal CustomUserPrincipal principal
+    ) {
+        CandidateViewStatsDto stats = candidateService.getProfileViewStats(principal);
+        return ResponseEntity.ok(ApiResponse.success("Profile view statistics fetched successfully", stats));
+    }
+
+    @PostMapping("/{id}/view")
+    @Operation(summary = "Record institutional view when facility browses candidate profile")
+    public ResponseEntity<ApiResponse<Void>> recordView(
+            @PathVariable UUID id,
+            @RequestParam(required = false) UUID facilityId,
+            @RequestParam(required = false, defaultValue = "Partner Healthcare Facility") String facilityName
+    ) {
+        candidateService.recordProfileView(id, facilityId, facilityName);
+        return ResponseEntity.ok(ApiResponse.success("Profile view recorded"));
     }
 }

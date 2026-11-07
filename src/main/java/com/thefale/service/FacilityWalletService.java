@@ -13,6 +13,7 @@ import com.thefale.exception.ResourceNotFoundException;
 import com.thefale.repository.FacilityProfileRepository;
 import com.thefale.repository.FacilityWalletRepository;
 import com.thefale.repository.WalletTransactionRepository;
+import com.thefale.repository.HospitalBankAccountRepository;
 import com.thefale.security.CustomUserPrincipal;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -34,6 +35,7 @@ public class FacilityWalletService {
     private final FacilityService facilityService;
     private final FacilityWalletRepository facilityWalletRepository;
     private final WalletTransactionRepository walletTransactionRepository;
+    private final HospitalBankAccountRepository hospitalBankAccountRepository;
     private final AuditLogService auditLogService;
 
     @Transactional
@@ -46,8 +48,14 @@ public class FacilityWalletService {
                         .availableBalance(BigDecimal.ZERO)
                         .lockedEscrowBalance(BigDecimal.ZERO)
                         .totalDisbursed(BigDecimal.ZERO)
-                        .candidateCredits(3)
+                        .candidateCredits(0)
                         .build()));
+
+        // Self-heal legacy wallet rows that were created with the old static default of 3
+        if (wallet.getCandidateCredits() == 3) {
+            wallet.setCandidateCredits(0);
+            wallet = facilityWalletRepository.save(wallet);
+        }
 
         return mapWalletToDto(wallet);
     }
@@ -62,7 +70,7 @@ public class FacilityWalletService {
                         .availableBalance(BigDecimal.ZERO)
                         .lockedEscrowBalance(BigDecimal.ZERO)
                         .totalDisbursed(BigDecimal.ZERO)
-                        .candidateCredits(3)
+                        .candidateCredits(0)
                         .build()));
 
         return walletTransactionRepository.findByWalletIdOrderByCreatedAtDesc(wallet.getId()).stream()
@@ -73,6 +81,10 @@ public class FacilityWalletService {
     @Transactional
     public FacilityWalletDto topUp(CustomUserPrincipal principal, WalletTopUpRequest request) {
         FacilityProfile facility = facilityService.getOrCreateFacilityProfile(principal);
+
+        if (hospitalBankAccountRepository.findByFacilityId(facility.getId()).isEmpty()) {
+            throw new BadRequestException("Hospital settlement bank account must be linked and verified before topping up escrow.");
+        }
 
         String utr = request.getUtr().trim().toUpperCase();
         if (walletTransactionRepository.existsByUtr(utr)) {
@@ -85,7 +97,7 @@ public class FacilityWalletService {
                         .availableBalance(BigDecimal.ZERO)
                         .lockedEscrowBalance(BigDecimal.ZERO)
                         .totalDisbursed(BigDecimal.ZERO)
-                        .candidateCredits(3)
+                        .candidateCredits(0)
                         .build()));
 
         // Convert paise to Rupees (e.g. 2500000 paise -> 25000.00)
@@ -122,6 +134,10 @@ public class FacilityWalletService {
     @Transactional
     public FacilityWalletDto buyCredits(CustomUserPrincipal principal, BuyCreditsRequest request) {
         FacilityProfile facility = facilityService.getOrCreateFacilityProfile(principal);
+
+        if (hospitalBankAccountRepository.findByFacilityId(facility.getId()).isEmpty()) {
+            throw new BadRequestException("Hospital settlement bank account must be linked and verified before purchasing sourcing credits.");
+        }
 
         FacilityWallet wallet = facilityWalletRepository.findByFacilityIdWithLock(facility.getId())
                 .orElseThrow(() -> new ResourceNotFoundException("Facility wallet not found"));

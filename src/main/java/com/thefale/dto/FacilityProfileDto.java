@@ -42,6 +42,7 @@ public class FacilityProfileDto {
     private java.util.List<String> facilityPhotos;
     private String kycStatus;
     private String kycNotes;
+    private java.util.List<FacilityDocumentDto> documents;
     private Instant verifiedAt;
     private Instant createdAt;
 }

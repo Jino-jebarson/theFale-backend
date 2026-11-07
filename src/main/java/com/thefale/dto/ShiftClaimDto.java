@@ -22,6 +22,7 @@ public class ShiftClaimDto {
     private Instant startAt;
     private Instant endAt;
     private int hours;
+    private Integer actualHours;
     private String status;
     private long grossAmountPaise;
     private long platformFeePaise;

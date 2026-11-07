@@ -13,5 +13,6 @@ public class CompleteShiftRequest {
     private String panNumber;
     private Boolean tdsConsent;
     private String declarationNotes;
+    private Integer actualHours;
 }
 

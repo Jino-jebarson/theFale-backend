@@ -204,6 +204,7 @@ public class JobService {
                 .employmentType(job.getEmploymentType())
                 .internship(job.isInternship())
                 .city(job.getCity())
+                .workLocation(job.getCity())
                 .openings(job.getOpenings())
                 .salaryMinPaise(minPaise)
                 .salaryMaxPaise(maxPaise)
@@ -248,11 +249,51 @@ public class JobService {
                 .candidateId(app.getCandidateId())
                 .candidateName(candidate != null ? candidate.getName() : "Candidate")
                 .candidateRole(candidate != null ? (candidate.getProfession() != null ? candidate.getProfession() : candidate.getCourse()) : null)
+                .candidateSpecialty(candidate != null ? candidate.getSpecialty() : null)
                 .candidateCity(candidate != null ? candidate.getCity() : null)
                 .candidateExperience(candidate != null ? candidate.getExperienceYears() : null)
                 .councilVerified(candidate != null && "VERIFIED".equalsIgnoreCase(candidate.getKycStatus()))
                 .regNumber(candidate != null ? candidate.getRegNumber() : null)
                 .build();
+    }
+
+    private static boolean isDoctorCadre(String text) {
+        if (text == null) return false;
+        String t = text.toLowerCase();
+        return t.contains("doctor") || t.contains("physician") || t.contains("surgeon") ||
+               t.contains("cardiolog") || t.contains("pediatr") || t.contains("orthoped") ||
+               t.contains("gynecolog") || t.contains("gynaecolog") || t.contains("anesthesiolog") ||
+               t.contains("anaesthesiolog") || t.contains("intensivist") || t.contains("radiolog") ||
+               t.contains("patholog") || t.contains("consultant") || t.contains("resident") ||
+               t.contains("mbbs") || t.contains("md") || t.contains("ms") || t.contains("dnb") ||
+               t.contains("medical officer");
+    }
+
+    private static boolean isNurseCadre(String text) {
+        if (text == null) return false;
+        String t = text.toLowerCase();
+        return t.contains("nurse") || t.contains("nursing") || t.contains("sister") ||
+               t.contains("gnm") || t.contains("anm") || t.contains("matron") || t.contains("b.sc nursing");
+    }
+
+    private static boolean isPhysioCadre(String text) {
+        if (text == null) return false;
+        String t = text.toLowerCase();
+        return t.contains("physio") || t.contains("bpt") || t.contains("mpt") || t.contains("rehab");
+    }
+
+    private static boolean isPharmacistCadre(String text) {
+        if (text == null) return false;
+        String t = text.toLowerCase();
+        return t.contains("pharm") || t.contains("dispens");
+    }
+
+    private static boolean isTechnicianCadre(String text) {
+        if (text == null) return false;
+        String t = text.toLowerCase();
+        return t.contains("tech") || t.contains("dmlt") || t.contains("bmlt") || t.contains("x-ray") ||
+               t.contains("mri") || t.contains("radiograph") || t.contains("dialysis") ||
+               t.contains("ecg") || t.contains("cath");
     }
 
     public static int calculateMatchScore(CandidateProfile candidate, JobPosting job) {
@@ -269,17 +310,31 @@ public class JobService {
         String jobTitle = job.getTitle() != null ? job.getTitle().toLowerCase() : "";
         String jobDept = job.getDepartment() != null ? job.getDepartment().toLowerCase() : "";
 
-        if ((!candSpec.isBlank() && (jobTitle.contains(candSpec) || jobDept.contains(candSpec))) ||
-            (!candRole.isBlank() && (jobTitle.contains(candRole) || jobDept.contains(candRole))) ||
-            (!candCourse.isBlank() && (jobTitle.contains(candCourse) || jobDept.contains(candCourse)))) {
+        boolean sameCadre = (isDoctorCadre(candRole) && isDoctorCadre(jobTitle)) ||
+                            (isNurseCadre(candRole) && isNurseCadre(jobTitle)) ||
+                            (isPhysioCadre(candRole) && isPhysioCadre(jobTitle)) ||
+                            (isPharmacistCadre(candRole) && isPharmacistCadre(jobTitle)) ||
+                            (isTechnicianCadre(candRole) && isTechnicianCadre(jobTitle));
+
+        boolean specialtyMatch = false;
+        if (!candSpec.isBlank()) {
+            String cleanSpec = candSpec.length() > 5 ? candSpec.substring(0, 5) : candSpec;
+            if (jobTitle.contains(cleanSpec) || jobDept.contains(cleanSpec)) {
+                specialtyMatch = true;
+            }
+        }
+        if (!specialtyMatch && isDoctorCadre(candRole) && isDoctorCadre(jobTitle)) {
+            specialtyMatch = true;
+        }
+
+        if (sameCadre && specialtyMatch) {
             score += 25;
-        } else if (!candRole.isBlank() && !jobTitle.isBlank() && (
-                   (candRole.contains("nurse") && jobTitle.contains("nurse")) ||
-                   (candRole.contains("doctor") && jobTitle.contains("doctor")) ||
-                   (candRole.contains("physio") && jobTitle.contains("physio")) ||
-                   (candRole.contains("technician") && jobTitle.contains("technician")) ||
-                   (candRole.contains("pharmacist") && jobTitle.contains("pharmacist")))) {
+        } else if (sameCadre) {
             score += 20;
+        } else if ((!candSpec.isBlank() && (jobTitle.contains(candSpec) || jobDept.contains(candSpec))) ||
+                   (!candRole.isBlank() && (jobTitle.contains(candRole) || jobDept.contains(candRole))) ||
+                   (!candCourse.isBlank() && (jobTitle.contains(candCourse) || jobDept.contains(candCourse)))) {
+            score += 25;
         } else {
             score += 10;
         }

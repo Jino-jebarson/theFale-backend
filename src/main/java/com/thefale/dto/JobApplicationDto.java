@@ -29,6 +29,7 @@ public class JobApplicationDto {
     private String interviewLocationOrLink;
     private String withdrawalReason;
     private String candidateRole;
+    private String candidateSpecialty;
     private String candidateCity;
     private String candidateExperience;
     private String candidatePhone;
@@ -45,6 +46,10 @@ public class JobApplicationDto {
     private String resumeUrl;
     private String resumeFileName;
     private java.util.List<CandidateDocumentDto> candidateDocuments;
+
+    private Integer actualHours;
+    private Integer scheduledHours;
+    private Long hourlyRatePaise;
 
     public String getPhone() {
         return candidatePhone;

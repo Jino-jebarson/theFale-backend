@@ -16,9 +16,10 @@ import java.time.Instant;
 public class UpdateApplicationStatusRequest {
 
     @NotBlank(message = "Status is required")
-    @Pattern(regexp = "^(SHORTLISTED|INTERVIEW|INTERVIEW_SCHEDULED|OFFER|OFFERED|HIRED|CONFIRMED|CONFIRM_SHIFT|CLAIMED|REJECTED)$", message = "Invalid status transition")
+    @Pattern(regexp = "^(SHORTLISTED|INTERVIEW|INTERVIEW_SCHEDULED|OFFER|OFFERED|HIRED|CONFIRMED|CONFIRM_SHIFT|CLAIMED|REJECTED|TIMESHEET_SUBMITTED|TIMESHEET_VERIFIED|COMPLETED)$", message = "Invalid status transition")
     private String status;
 
     private Instant interviewScheduledAt;
     private String notes;
+    private Integer actualHours;
 }

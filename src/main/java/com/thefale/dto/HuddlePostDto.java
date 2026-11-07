@@ -23,6 +23,8 @@ public class HuddlePostDto {
     private String field;
     private String status;
     private String imageUrl;
+    private String audioUrl;
+    private Integer audioDuration;
     private Boolean isAnonymous;
     private int upvotes;
     private int flagCount;

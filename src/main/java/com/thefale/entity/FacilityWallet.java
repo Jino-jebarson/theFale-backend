@@ -38,7 +38,7 @@ public class FacilityWallet {
 
     @Builder.Default
     @Column(name = "candidate_credits", nullable = false)
-    private int candidateCredits = 3;
+    private int candidateCredits = 0;
 
     @Version
     @Column(nullable = false)

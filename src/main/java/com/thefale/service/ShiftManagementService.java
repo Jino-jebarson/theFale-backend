@@ -34,11 +34,16 @@ public class ShiftManagementService {
     private final ShiftClaimRepository shiftClaimRepository;
     private final MinimumRoleRateRepository minimumRoleRateRepository;
     private final CandidateProfileRepository candidateProfileRepository;
+    private final HospitalBankAccountRepository hospitalBankAccountRepository;
     private final AuditLogService auditLogService;
 
     @Transactional
     public LocumShiftDto postShift(CustomUserPrincipal principal, PostShiftRequest request) {
         FacilityProfile facility = facilityService.getOrCreateFacilityProfile(principal);
+
+        if (hospitalBankAccountRepository.findByFacilityId(facility.getId()).isEmpty()) {
+            throw new BadRequestException("Hospital settlement bank account must be linked and verified before broadcasting locum shifts (required for escrow custody and refunds).");
+        }
 
         if (!request.getEndAt().isAfter(request.getStartAt())) {
             throw new BadRequestException("Shift end time must be after start time");

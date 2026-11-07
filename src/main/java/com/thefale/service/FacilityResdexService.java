@@ -3,6 +3,7 @@ package com.thefale.service;
 import com.thefale.dto.CandidateResdexDto;
 import com.thefale.entity.CandidateDocument;
 import com.thefale.entity.CandidateProfile;
+import com.thefale.entity.CandidateProfileView;
 import com.thefale.entity.FacilityProfile;
 import com.thefale.entity.FacilityWallet;
 import com.thefale.entity.UnlockedCandidate;
@@ -11,6 +12,7 @@ import com.thefale.exception.BadRequestException;
 import com.thefale.exception.ResourceNotFoundException;
 import com.thefale.repository.CandidateDocumentRepository;
 import com.thefale.repository.CandidateProfileRepository;
+import com.thefale.repository.CandidateProfileViewRepository;
 import com.thefale.repository.FacilityProfileRepository;
 import com.thefale.repository.FacilityWalletRepository;
 import com.thefale.repository.UnlockedCandidateRepository;
@@ -36,6 +38,7 @@ public class FacilityResdexService {
     private final FacilityWalletRepository facilityWalletRepository;
     private final UnlockedCandidateRepository unlockedCandidateRepository;
     private final CandidateDocumentRepository candidateDocumentRepository;
+    private final CandidateProfileViewRepository candidateProfileViewRepository;
     private final UserRepository userRepository;
     private final AuditLogService auditLogService;
 
@@ -87,6 +90,13 @@ public class FacilityResdexService {
                     .creditsSpent(1)
                     .build();
             unlockedCandidateRepository.save(unlock);
+
+            // Record institutional profile view dynamically for candidate dashboard
+            candidateProfileViewRepository.save(CandidateProfileView.builder()
+                    .candidateId(candidate.getId())
+                    .facilityId(facility.getId())
+                    .facilityName(facility.getHospitalName() != null && !facility.getHospitalName().isBlank() ? facility.getHospitalName() : "Partner Healthcare Facility")
+                    .build());
 
             auditLogService.logEvent(principal.getId(), "CANDIDATE_CONTACT_UNLOCKED", "CandidateProfile", candidate.getId().toString(), null);
         }

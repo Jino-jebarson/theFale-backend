@@ -30,6 +30,8 @@ public class PostJobRequest {
     @NotBlank(message = "City is required")
     private String city;
 
+    private String workLocation;
+
     @Min(value = 1, message = "Openings must be at least 1")
     private int openings;
 

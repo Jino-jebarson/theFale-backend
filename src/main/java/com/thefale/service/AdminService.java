@@ -13,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -41,6 +42,7 @@ public class AdminService {
     private final AuditLogService auditLogService;
     private final JobApplicationRepository jobApplicationRepository;
     private final CandidateDocumentRepository candidateDocumentRepository;
+    private final FacilityDocumentRepository facilityDocumentRepository;
     private final HuddleService huddleService;
     private final MentorApplicationRepository mentorApplicationRepository;
 
@@ -73,6 +75,67 @@ public class AdminService {
                 .filter(c -> c.getProfession() != null && !c.getProfession().isBlank())
                 .collect(Collectors.groupingBy(CandidateProfile::getProfession, Collectors.counting()));
 
+        // Dynamic SLA Turnaround calculation from real database submissions
+        List<Double> turnaroundHoursList = new ArrayList<>();
+        int onTimeCount = 0;
+
+        List<CandidateProfile> allCandidates = candidateProfileRepository.findAll();
+        for (CandidateProfile c : allCandidates) {
+            if (c.getCreatedAt() != null) {
+                if (!"PENDING".equalsIgnoreCase(c.getKycStatus()) && c.getUpdatedAt() != null) {
+                    double hours = Math.max(0.1, java.time.Duration.between(c.getCreatedAt(), c.getUpdatedAt()).toMinutes() / 60.0);
+                    turnaroundHoursList.add(hours);
+                    if (hours <= 24.0) onTimeCount++;
+                } else if ("PENDING".equalsIgnoreCase(c.getKycStatus())) {
+                    double currentWaitingHours = Math.max(0.1, java.time.Duration.between(c.getCreatedAt(), java.time.Instant.now()).toMinutes() / 60.0);
+                    turnaroundHoursList.add(currentWaitingHours);
+                    if (currentWaitingHours <= 24.0) onTimeCount++;
+                }
+            }
+        }
+
+        List<FacilityProfile> allFacilities = facilityProfileRepository.findAll();
+        for (FacilityProfile f : allFacilities) {
+            if (f.getCreatedAt() != null) {
+                if (f.getVerifiedAt() != null) {
+                    double hours = Math.max(0.1, java.time.Duration.between(f.getCreatedAt(), f.getVerifiedAt()).toMinutes() / 60.0);
+                    turnaroundHoursList.add(hours);
+                    if (hours <= 24.0) onTimeCount++;
+                } else if (!"PENDING".equalsIgnoreCase(f.getKycStatus()) && f.getUpdatedAt() != null) {
+                    double hours = Math.max(0.1, java.time.Duration.between(f.getCreatedAt(), f.getUpdatedAt()).toMinutes() / 60.0);
+                    turnaroundHoursList.add(hours);
+                    if (hours <= 24.0) onTimeCount++;
+                } else if ("PENDING".equalsIgnoreCase(f.getKycStatus())) {
+                    double currentWaitingHours = Math.max(0.1, java.time.Duration.between(f.getCreatedAt(), java.time.Instant.now()).toMinutes() / 60.0);
+                    turnaroundHoursList.add(currentWaitingHours);
+                    if (currentWaitingHours <= 24.0) onTimeCount++;
+                }
+            }
+        }
+
+        List<StudentUpgradeRequest> allUpgrades = studentUpgradeRequestRepository.findAll();
+        for (StudentUpgradeRequest u : allUpgrades) {
+            if (u.getCreatedAt() != null) {
+                if (u.getReviewedAt() != null) {
+                    double hours = Math.max(0.1, java.time.Duration.between(u.getCreatedAt(), u.getReviewedAt()).toMinutes() / 60.0);
+                    turnaroundHoursList.add(hours);
+                    if (hours <= 24.0) onTimeCount++;
+                } else if ("PENDING".equalsIgnoreCase(u.getStatus())) {
+                    double currentWaitingHours = Math.max(0.1, java.time.Duration.between(u.getCreatedAt(), java.time.Instant.now()).toMinutes() / 60.0);
+                    turnaroundHoursList.add(currentWaitingHours);
+                    if (currentWaitingHours <= 24.0) onTimeCount++;
+                }
+            }
+        }
+
+        double dynamicTurnaround = 0.0;
+        double dynamicOnTimePct = 100.0;
+        if (!turnaroundHoursList.isEmpty()) {
+            double sum = turnaroundHoursList.stream().mapToDouble(Double::doubleValue).sum();
+            dynamicTurnaround = Math.round((sum / turnaroundHoursList.size()) * 10.0) / 10.0;
+            dynamicOnTimePct = Math.round(((double) onTimeCount / turnaroundHoursList.size()) * 1000.0) / 10.0;
+        }
+
         return AdminDashboardMetricsDto.builder()
                 .pendingCandidateKycCount(pendingCandidates)
                 .verifiedCandidatesCount(verifiedCandidates)
@@ -89,8 +152,8 @@ public class AdminService {
                 .pendingShiftPayoutsCount(pendingPayouts)
                 .flaggedHuddlePostsCount(flaggedHuddlePosts)
                 .studentUpgradeRequestsCount(upgradeRequests)
-                .slaTurnaroundHours(2.8)
-                .slaOnTimePercentage(98.6)
+                .slaTurnaroundHours(dynamicTurnaround)
+                .slaOnTimePercentage(dynamicOnTimePct)
                 .cadreBreakdown(cadre)
                 .build();
     }
@@ -984,6 +1047,26 @@ public class AdminService {
     }
 
     private FacilityProfileDto mapFacilityToDto(FacilityProfile f) {
+        List<FacilityDocumentDto> docs = Collections.emptyList();
+        if (f.getId() != null) {
+            try {
+                docs = facilityDocumentRepository.findByFacilityId(f.getId()).stream()
+                        .map(d -> FacilityDocumentDto.builder()
+                                .id(d.getId())
+                                .documentType(d.getDocumentType())
+                                .originalFileName(d.getOriginalFileName())
+                                .fileUrl(d.getFileUrl())
+                                .fileSizeBytes(d.getFileSizeBytes())
+                                .mimeType(d.getMimeType())
+                                .verified(d.isVerified())
+                                .createdAt(d.getCreatedAt())
+                                .build())
+                        .collect(Collectors.toList());
+            } catch (Exception e) {
+                log.warn("Failed to load facility docs for admin: {}", e.getMessage());
+            }
+        }
+
         return FacilityProfileDto.builder()
                 .id(f.getId())
                 .userId(f.getUserId())
@@ -1010,6 +1093,7 @@ public class AdminService {
                 .hiringNeeds(jsonToList(f.getHiringNeeds()))
                 .facilityPhotos(jsonToList(f.getFacilityPhotos()))
                 .logoUrl(f.getLogoUrl())
+                .documents(docs)
                 .kycStatus(f.getKycStatus())
                 .kycNotes(f.getKycNotes())
                 .verifiedAt(f.getVerifiedAt())

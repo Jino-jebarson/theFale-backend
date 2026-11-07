@@ -25,6 +25,8 @@ public class CreateHuddlePostRequest {
     private String field;
 
     private String imageUrl;
+    private String audioUrl;
+    private Integer audioDuration;
 
     private Boolean isAnonymous;
 }

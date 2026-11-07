@@ -73,6 +73,30 @@ public class FacilityOnboardingRequest {
     private String logoUrl;
     private java.util.List<String> facilityPhotos;
 
+    // Verification documents directly on onboarding request (exact candidate pattern)
+    private String facilityRegistrationUrl;
+    private String facilityRegistrationFileName;
+
+    private String gstCertificateUrl;
+    private String gstCertificateFileName;
+
+    private String representativeAuthorizationUrl;
+    private String representativeAuthorizationFileName;
+
+    private String nabhCertificateUrl;
+    private String nabhCertificateFileName;
+
+    private String fireSafetyClearanceUrl;
+    private String fireSafetyClearanceFileName;
+
+    private String pollutionControlClearanceUrl;
+    private String pollutionControlClearanceFileName;
+
+    private String biomedicalWasteClearanceUrl;
+    private String biomedicalWasteClearanceFileName;
+
+    private java.util.List<FacilityDocumentUploadRequest> documents;
+
     @JsonSetter("departments")
     public void setDepartments(JsonNode node) {
         this.departments = parseStringOrArray(node);

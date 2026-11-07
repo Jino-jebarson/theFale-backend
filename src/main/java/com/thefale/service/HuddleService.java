@@ -62,6 +62,8 @@ public class HuddleService {
                 .type(request.getType().trim())
                 .field(request.getField().trim())
                 .imageUrl(request.getImageUrl())
+                .audioUrl(request.getAudioUrl())
+                .audioDuration(request.getAudioDuration())
                 .isAnonymous(isAnon)
                 .status(isReview ? "REVIEW" : "LIVE")
                 .upvotes(0)
@@ -101,6 +103,12 @@ public class HuddleService {
         }
         if (request.getImageUrl() != null) {
             post.setImageUrl(request.getImageUrl().trim().isEmpty() ? null : request.getImageUrl().trim());
+        }
+        if (request.getAudioUrl() != null) {
+            post.setAudioUrl(request.getAudioUrl().trim().isEmpty() ? null : request.getAudioUrl().trim());
+        }
+        if (request.getAudioDuration() != null) {
+            post.setAudioDuration(request.getAudioDuration());
         }
         if (request.getIsAnonymous() != null) {
             post.setIsAnonymous(request.getIsAnonymous());
@@ -364,6 +372,8 @@ public class HuddleService {
                 .type(p.getType())
                 .field(p.getField())
                 .imageUrl(p.getImageUrl())
+                .audioUrl(p.getAudioUrl())
+                .audioDuration(p.getAudioDuration())
                 .isAnonymous(isAnon)
                 .status(p.getStatus())
                 .upvotes(p.getUpvotes())

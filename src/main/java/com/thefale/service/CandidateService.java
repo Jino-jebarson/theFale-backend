@@ -31,6 +31,7 @@ public class CandidateService {
     private final CandidateDocumentRepository documentRepository;
     private final CandidatePayoutMethodRepository payoutMethodRepository;
     private final StudentUpgradeRequestRepository upgradeRequestRepository;
+    private final CandidateProfileViewRepository profileViewRepository;
     private final AuditLogService auditLogService;
     private final ObjectMapper objectMapper;
 
@@ -310,6 +311,18 @@ public class CandidateService {
                 .build();
     }
 
+    @Transactional(readOnly = true)
+    public CandidatePayoutMethodDto getPayoutMethod(CustomUserPrincipal principal) {
+        CandidateProfile profile = profileRepository.findByUserId(principal.getId())
+                .orElse(null);
+        if (profile == null) {
+            return null;
+        }
+        return payoutMethodRepository.findByCandidateId(profile.getId())
+                .map(this::mapPayoutMethodToDto)
+                .orElse(null);
+    }
+
     @Transactional
     public CandidatePayoutMethodDto savePayoutMethod(CustomUserPrincipal principal, CandidatePayoutMethodDto request) {
         CandidateProfile profile = profileRepository.findByUserId(principal.getId())
@@ -450,19 +463,36 @@ public class CandidateService {
         if (fileUrl != null && !fileUrl.isBlank()) {
             String lowerName = (defaultName != null ? defaultName : fileUrl).toLowerCase();
             String mime = "application/pdf";
-            if (lowerName.endsWith(".jpg") || lowerName.endsWith(".jpeg")) {
+            if (fileUrl.startsWith("data:application/pdf")) {
+                mime = "application/pdf";
+            } else if (fileUrl.startsWith("data:image/png")) {
+                mime = "image/png";
+            } else if (fileUrl.startsWith("data:image/jpeg") || fileUrl.startsWith("data:image/jpg")) {
+                mime = "image/jpeg";
+            } else if (fileUrl.startsWith("data:image/webp")) {
+                mime = "image/webp";
+            } else if (lowerName.endsWith(".jpg") || lowerName.endsWith(".jpeg")) {
                 mime = "image/jpeg";
             } else if (lowerName.endsWith(".png")) {
                 mime = "image/png";
             } else if (lowerName.endsWith(".webp")) {
                 mime = "image/webp";
             }
+
+            long calculatedSize = 256000L;
+            if (fileUrl.startsWith("data:")) {
+                int commaIdx = fileUrl.indexOf(",");
+                if (commaIdx != -1) {
+                    calculatedSize = (long) ((fileUrl.length() - commaIdx - 1) * 0.75);
+                }
+            }
+
             CandidateDocument doc = CandidateDocument.builder()
                     .candidateId(candidateId)
                     .documentType(docType)
                     .fileUrl(fileUrl)
                     .originalFileName(defaultName != null ? defaultName : "Document.pdf")
-                    .fileSizeBytes(256000L)
+                    .fileSizeBytes(calculatedSize > 0 ? calculatedSize : 256000L)
                     .mimeType(mime)
                     .verified(false)
                     .build();
@@ -501,5 +531,60 @@ public class CandidateService {
                 .status(method.getStatus())
                 .verifiedAt(method.getVerifiedAt())
                 .build();
+    }
+
+    @Transactional(readOnly = true)
+    public CandidateViewStatsDto getProfileViewStats(CustomUserPrincipal principal) {
+        CandidateProfile profile = profileRepository.findByUserId(principal.getId())
+                .orElse(null);
+
+        if (profile == null) {
+            return CandidateViewStatsDto.builder()
+                    .totalViews(0)
+                    .viewsToday(0)
+                    .hospitalsViewedToday(0)
+                    .weeklyGrowthPercent(0)
+                    .hasIncreased(false)
+                    .build();
+        }
+
+        UUID candidateId = profile.getId();
+        long total = profileViewRepository.countByCandidateId(candidateId);
+
+        java.time.OffsetDateTime startOfToday = java.time.OffsetDateTime.now()
+                .withHour(0).withMinute(0).withSecond(0).withNano(0);
+        long todayViews = profileViewRepository.countByCandidateIdAndViewedAtGreaterThanEqual(candidateId, startOfToday);
+        long hospitalsToday = profileViewRepository.countDistinctFacilitiesByCandidateIdAndViewedAtGreaterThanEqual(candidateId, startOfToday);
+
+        java.time.OffsetDateTime sevenDaysAgo = java.time.OffsetDateTime.now().minusDays(7);
+        java.time.OffsetDateTime fourteenDaysAgo = java.time.OffsetDateTime.now().minusDays(14);
+
+        long last7Days = profileViewRepository.countByCandidateIdAndViewedAtGreaterThanEqual(candidateId, sevenDaysAgo);
+        long prev7Days = profileViewRepository.countByCandidateIdAndViewedAtBetween(candidateId, fourteenDaysAgo, sevenDaysAgo);
+
+        int growth = 0;
+        if (prev7Days > 0) {
+            growth = (int) Math.round(((double) (last7Days - prev7Days) / prev7Days) * 100);
+        } else if (last7Days > 0) {
+            growth = (int) Math.min(100, last7Days * 10);
+        }
+
+        return CandidateViewStatsDto.builder()
+                .totalViews(total)
+                .viewsToday(todayViews)
+                .hospitalsViewedToday(hospitalsToday)
+                .weeklyGrowthPercent(growth)
+                .hasIncreased(growth >= 0)
+                .build();
+    }
+
+    @Transactional
+    public void recordProfileView(UUID candidateId, UUID facilityId, String facilityName) {
+        CandidateProfileView view = CandidateProfileView.builder()
+                .candidateId(candidateId)
+                .facilityId(facilityId)
+                .facilityName(facilityName != null && !facilityName.isBlank() ? facilityName : "Partner Healthcare Facility")
+                .build();
+        profileViewRepository.save(view);
     }
 }

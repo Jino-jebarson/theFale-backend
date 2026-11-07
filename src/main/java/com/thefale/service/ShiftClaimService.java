@@ -63,7 +63,13 @@ public class ShiftClaimService {
         Optional<ShiftClaim> existingClaimOpt = shiftClaimRepository.findByShiftIdAndCandidateId(shiftId, candidate.getId());
         if (existingClaimOpt.isPresent()) {
             ShiftClaim existing = existingClaimOpt.get();
-            if (!"CANCELLED".equalsIgnoreCase(existing.getStatus()) && !"REJECTED".equalsIgnoreCase(existing.getStatus()) && !"WITHDRAWN".equalsIgnoreCase(existing.getStatus())) {
+            if ("REJECTED".equalsIgnoreCase(existing.getStatus())) {
+                throw new BadRequestException("Your previous claim for this shift was declined by the facility. You cannot re-apply for this same shift.");
+            }
+            if ("SLOT_FILLED".equalsIgnoreCase(existing.getStatus())) {
+                throw new BadRequestException("All openings for this shift have been filled.");
+            }
+            if (!"CANCELLED".equalsIgnoreCase(existing.getStatus()) && !"WITHDRAWN".equalsIgnoreCase(existing.getStatus())) {
                 throw new ConflictException("You have already claimed a slot for this shift");
             }
         }
@@ -200,10 +206,85 @@ public class ShiftClaimService {
         LocumShift shift = locumShiftRepository.findById(claim.getShiftId())
                 .orElseThrow(() -> new ResourceNotFoundException("Shift not found"));
 
-        // Can be completed by facility or candidate
+        boolean isFacility = principal != null && (principal.isFacility() || principal.isAdmin());
+        int scheduledHours = shift.getHours() > 0 ? shift.getHours() : 8;
+        int hoursClaimed = (request != null && request.getActualHours() != null && request.getActualHours() > 0)
+                ? request.getActualHours()
+                : (claim.getActualHours() != null && claim.getActualHours() > 0 ? claim.getActualHours() : scheduledHours);
+
+        if (!isFacility) {
+            // Candidate submits timesheet for hospital review & sign-off
+            claim.setActualHours(hoursClaimed);
+            claim.setStatus("TIMESHEET_SUBMITTED");
+            ShiftClaim saved = shiftClaimRepository.save(claim);
+
+            FacilityProfile facility = facilityProfileRepository.findById(shift.getFacilityId()).orElse(null);
+            CandidateProfile candidate = candidateProfileRepository.findById(claim.getCandidateId()).orElse(null);
+            if (facility != null) {
+                String candName = candidate != null && candidate.getName() != null ? candidate.getName() : "Clinician";
+                Notification notification = Notification.builder()
+                        .userId(facility.getUserId())
+                        .title("Timesheet Submitted: " + shift.getTitle())
+                        .message(candName + " reported " + hoursClaimed + " hrs duty for " + shift.getTitle() + ". Please review and verify timesheet to release escrow.")
+                        .type("SHIFT_TIMESHEET")
+                        .actionUrl("/employer/applicants")
+                        .read(false)
+                        .build();
+                notificationRepository.save(notification);
+            }
+
+            auditLogService.logEvent(principal.getId(), "SHIFT_TIMESHEET_SUBMITTED", "ShiftClaim", saved.getId().toString(), null);
+            return mapClaimToDto(saved, shift, facility);
+        }
+
+        // Facility / Admin verifies timesheet -> Escrow released & reconciled
         claim.setStatus("COMPLETED");
         claim.setCompletedAt(Instant.now());
         claim.setPayoutStatus("PENDING_DISBURSEMENT");
+        claim.setActualHours(hoursClaimed);
+
+        // Escrow Reconciliation: Scheduled vs Verified Actual Hours Worked
+        if (hoursClaimed < scheduledHours) {
+            BigDecimal effectiveHourlyRate = shift.getRatePerHour().add(shift.getSurgeRatePerHour() != null ? shift.getSurgeRatePerHour() : BigDecimal.ZERO);
+            BigDecimal scheduledGross = effectiveHourlyRate.multiply(BigDecimal.valueOf(scheduledHours));
+            BigDecimal newGross = effectiveHourlyRate.multiply(BigDecimal.valueOf(hoursClaimed));
+            BigDecimal unusedEscrow = scheduledGross.subtract(newGross);
+
+            if (unusedEscrow.compareTo(BigDecimal.ZERO) > 0) {
+                // Update facility wallet: release unused escrow hold back to available balance
+                facilityWalletRepository.findByFacilityIdWithLock(shift.getFacilityId()).ifPresent(wallet -> {
+                    wallet.setLockedEscrowBalance(wallet.getLockedEscrowBalance().subtract(unusedEscrow));
+                    wallet.setAvailableBalance(wallet.getAvailableBalance().add(unusedEscrow));
+                    facilityWalletRepository.save(wallet);
+
+                    String refundRef = "ESCROW-REF-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+                    WalletTransaction refundTx = WalletTransaction.builder()
+                            .walletId(wallet.getId())
+                            .type("refund")
+                            .amount(unusedEscrow)
+                            .balanceAfter(wallet.getAvailableBalance())
+                            .status("Completed")
+                            .refNumber(refundRef)
+                            .title("Timesheet Verification Refund: " + shift.getTitle())
+                            .subtitle((scheduledHours - hoursClaimed) + " unused shift hours refunded (" + hoursClaimed + "h verified vs " + scheduledHours + "h scheduled)")
+                            .build();
+                    walletTransactionRepository.save(refundTx);
+                });
+
+                // Recalculate candidate claim amounts based on verified hours worked
+                BigDecimal feePercent = getSettingAsDecimal("PLATFORM_FEE_PERCENT", BigDecimal.valueOf(5.0));
+                BigDecimal tdsPercent = getSettingAsDecimal("TDS_PERCENT", BigDecimal.valueOf(1.0));
+
+                BigDecimal platformFee = newGross.multiply(feePercent).divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
+                BigDecimal tdsAmount = newGross.multiply(tdsPercent).divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
+                BigDecimal netAmount = newGross.subtract(platformFee).subtract(tdsAmount);
+
+                claim.setGrossAmount(newGross);
+                claim.setPlatformFee(platformFee);
+                claim.setTdsAmount(tdsAmount);
+                claim.setNetAmount(netAmount);
+            }
+        }
 
         if (request != null && request.getPanNumber() != null && !request.getPanNumber().isBlank()) {
             String pan = request.getPanNumber().trim().toUpperCase();
@@ -334,6 +415,7 @@ public class ShiftClaimService {
                 .startAt(s != null ? s.getStartAt() : null)
                 .endAt(s != null ? s.getEndAt() : null)
                 .hours(s != null ? s.getHours() : 8)
+                .actualHours(c.getActualHours())
                 .status(c.getStatus())
                 .grossAmountPaise(c.getGrossAmount().multiply(BigDecimal.valueOf(100)).longValue())
                 .platformFeePaise(c.getPlatformFee().multiply(BigDecimal.valueOf(100)).longValue())

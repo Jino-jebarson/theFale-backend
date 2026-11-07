@@ -42,6 +42,12 @@ public class HuddlePost {
     @Column(name = "image_url", columnDefinition = "TEXT")
     private String imageUrl;
 
+    @Column(name = "audio_url", columnDefinition = "TEXT")
+    private String audioUrl;
+
+    @Column(name = "audio_duration")
+    private Integer audioDuration;
+
     @Builder.Default
     @Column(name = "is_anonymous", nullable = false)
     private Boolean isAnonymous = false;

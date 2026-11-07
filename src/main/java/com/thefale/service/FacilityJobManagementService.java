@@ -40,6 +40,7 @@ public class FacilityJobManagementService {
     private final CandidateDocumentRepository candidateDocumentRepository;
     private final NotificationRepository notificationRepository;
     private final AuditLogService auditLogService;
+    private final ShiftClaimService shiftClaimService;
 
     @Transactional
     public JobPostingDto postJob(CustomUserPrincipal principal, PostJobRequest request) {
@@ -54,13 +55,17 @@ public class FacilityJobManagementService {
         BigDecimal maxRupees = BigDecimal.valueOf(request.getSalaryMaxPaise())
                 .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
 
+        String resolvedLocation = (request.getWorkLocation() != null && !request.getWorkLocation().isBlank())
+                ? request.getWorkLocation().trim()
+                : (request.getCity() != null ? request.getCity().trim() : facility.getCity());
+
         JobPosting job = JobPosting.builder()
                 .facilityId(facility.getId())
                 .title(request.getTitle().trim())
                 .department(request.getDepartment().trim())
                 .employmentType(request.getEmploymentType().trim())
                 .internship(request.isInternship())
-                .city(request.getCity().trim())
+                .city(resolvedLocation)
                 .openings(request.getOpenings())
                 .salaryMin(minRupees)
                 .salaryMax(maxRupees)
@@ -102,7 +107,7 @@ public class FacilityJobManagementService {
         }
 
         List<UUID> jobIds = facilityJobs.stream().map(JobPosting::getId).collect(Collectors.toList());
-        Set<String> allowedShortlistedStatuses = Set.of("SHORTLISTED", "INTERVIEW", "OFFER", "OFFERED", "HIRED", "REJECTED");
+        Set<String> allowedShortlistedStatuses = Set.of("SHORTLISTED", "INTERVIEW", "OFFER", "OFFERED", "HIRED", "REJECTED", "POSITION_FILLED");
 
         List<JobApplicationDto> results = new java.util.ArrayList<>(jobApplicationRepository.findByJobIdIn(jobIds).stream()
                 .filter(app -> allowedShortlistedStatuses.contains(app.getStatus().toUpperCase()))
@@ -118,12 +123,15 @@ public class FacilityJobManagementService {
             List<LocumShift> facilityShifts = locumShiftRepository.findByFacilityIdOrderByStartAtDesc(facility.getId());
             List<UUID> shiftIds = facilityShifts.stream().map(LocumShift::getId).collect(Collectors.toList());
             if (!shiftIds.isEmpty()) {
-                Set<String> allowedShiftStatuses = Set.of("CONFIRMED", "CHECKED_IN", "COMPLETED", "CLAIMED");
+                Set<String> allowedShiftStatuses = Set.of(
+                        "CONFIRMED", "CHECKED_IN", "IN_PROGRESS", "TIMESHEET_SUBMITTED", "COMPLETED", "CLAIMED", "CLAIM_PENDING_ADMIN", "REJECTED", "SLOT_FILLED"
+                );
                 List<JobApplicationDto> shiftApplicants = shiftClaimRepository.findByShiftIdIn(shiftIds).stream()
                         .filter(claim -> allowedShiftStatuses.contains(claim.getStatus().toUpperCase()))
                         .filter(claim -> statusFilter == null || statusFilter.equalsIgnoreCase("All")
                                 || claim.getStatus().equalsIgnoreCase(statusFilter)
-                                || (statusFilter.equalsIgnoreCase("SHORTLISTED") && ("CLAIMED".equalsIgnoreCase(claim.getStatus()) || "CONFIRMED".equalsIgnoreCase(claim.getStatus()))))
+                                || (statusFilter.equalsIgnoreCase("SHORTLISTED") && ("CLAIMED".equalsIgnoreCase(claim.getStatus()) || "CONFIRMED".equalsIgnoreCase(claim.getStatus())))
+                                || (statusFilter.equalsIgnoreCase("TIMESHEET_SUBMITTED") && "TIMESHEET_SUBMITTED".equalsIgnoreCase(claim.getStatus())))
                         .map(claim -> {
                             LocumShift shift = facilityShifts.stream().filter(s -> s.getId().equals(claim.getShiftId())).findFirst().orElse(null);
                             return mapShiftClaimToDto(claim, shift, facility.getId());
@@ -148,9 +156,39 @@ public class FacilityJobManagementService {
             if (!shift.getFacilityId().equals(facility.getId())) {
                 throw new ForbiddenException("Unauthorized to manage shift claim for this facility");
             }
-            if ("REJECTED".equalsIgnoreCase(request.getStatus())) {
+            if ("COMPLETED".equalsIgnoreCase(request.getStatus()) || "TIMESHEET_VERIFIED".equalsIgnoreCase(request.getStatus())) {
+                com.thefale.dto.CompleteShiftRequest completeReq = new com.thefale.dto.CompleteShiftRequest();
+                completeReq.setActualHours(request.getActualHours());
+                shiftClaimService.completeShift(principal, claim.getId(), completeReq);
+                ShiftClaim updated = shiftClaimRepository.findById(claim.getId()).orElse(claim);
+                return mapShiftClaimToDto(updated, shift, facility.getId());
+            } else if ("REJECTED".equalsIgnoreCase(request.getStatus())) {
                 claim.setStatus("REJECTED");
                 shiftClaimRepository.save(claim);
+
+                // If shift was marked BOOKED or FILLED, reopen it if confirmed count is less than openings
+                List<ShiftClaim> allShiftClaims = shiftClaimRepository.findByShiftId(shift.getId());
+                long confirmedCount = allShiftClaims.stream()
+                        .filter(c -> "CONFIRMED".equalsIgnoreCase(c.getStatus()) || "CHECKED_IN".equalsIgnoreCase(c.getStatus()) || "COMPLETED".equalsIgnoreCase(c.getStatus()))
+                        .count();
+                if (confirmedCount < shift.getOpenings()) {
+                    shift.setStatus("OPEN");
+                    shift.setSlotsClaimed((int) confirmedCount);
+                    locumShiftRepository.save(shift);
+                }
+
+                CandidateProfile candidate = candidateProfileRepository.findById(claim.getCandidateId()).orElse(null);
+                if (candidate != null) {
+                    Notification notification = Notification.builder()
+                            .userId(candidate.getUserId())
+                            .title("Shift Claim Declined: " + shift.getTitle())
+                            .message("Your claim for " + shift.getTitle() + " at " + facility.getHospitalName() + " was not accepted" + (request.getNotes() != null && !request.getNotes().isBlank() ? ": " + request.getNotes() : "."))
+                            .type("SHIFT")
+                            .actionUrl("/shifts")
+                            .read(false)
+                            .build();
+                    notificationRepository.save(notification);
+                }
             } else if ("CONFIRMED".equalsIgnoreCase(request.getStatus()) || "CONFIRM_SHIFT".equalsIgnoreCase(request.getStatus()) || "HIRED".equalsIgnoreCase(request.getStatus())) {
                 claim.setStatus("CONFIRMED");
                 shiftClaimRepository.save(claim);
@@ -166,6 +204,39 @@ public class FacilityJobManagementService {
                             .read(false)
                             .build();
                     notificationRepository.save(notification);
+                }
+
+                // Check if all openings are now confirmed
+                List<ShiftClaim> allShiftClaims = shiftClaimRepository.findByShiftId(shift.getId());
+                long confirmedCount = allShiftClaims.stream()
+                        .filter(c -> "CONFIRMED".equalsIgnoreCase(c.getStatus()) || "CHECKED_IN".equalsIgnoreCase(c.getStatus()) || "COMPLETED".equalsIgnoreCase(c.getStatus()))
+                        .count();
+
+                if (confirmedCount >= shift.getOpenings()) {
+                    shift.setStatus("FILLED");
+                    shift.setSlotsClaimed(shift.getOpenings());
+                    locumShiftRepository.save(shift);
+
+                    // Auto-release remaining pending claimants with a respectful notification
+                    for (ShiftClaim other : allShiftClaims) {
+                        if (!other.getId().equals(claim.getId()) && "CLAIMED".equalsIgnoreCase(other.getStatus())) {
+                            other.setStatus("SLOT_FILLED");
+                            shiftClaimRepository.save(other);
+
+                            CandidateProfile otherCand = candidateProfileRepository.findById(other.getCandidateId()).orElse(null);
+                            if (otherCand != null) {
+                                Notification notif = Notification.builder()
+                                        .userId(otherCand.getUserId())
+                                        .title("Shift Openings Filled: " + shift.getTitle())
+                                        .message("The requested " + shift.getOpenings() + " slot(s) for " + shift.getTitle() + " at " + facility.getHospitalName() + " have been filled. Your schedule has been unlocked for other clinical shifts.")
+                                        .type("SHIFT")
+                                        .actionUrl("/shifts")
+                                        .read(false)
+                                        .build();
+                                notificationRepository.save(notif);
+                            }
+                        }
+                    }
                 }
             }
             return mapShiftClaimToDto(claim, shift, facility.getId());
@@ -217,32 +288,40 @@ public class FacilityJobManagementService {
         if (request.getNotes() != null) {
             application.setInterviewLocationOrLink(request.getNotes());
         }
+        if ("REJECTED".equalsIgnoreCase(targetStatus)) {
+            application.setWithdrawalReason(request.getNotes() != null ? request.getNotes() : "Candidate not selected after interview evaluation");
+        }
 
         JobApplication saved = jobApplicationRepository.save(application);
 
-        // When a candidate is hired for this role, close the job posting and close all other candidates' applications for this role
+        // When a candidate is hired for this role, check if all openings are filled
         if ("HIRED".equalsIgnoreCase(targetStatus)) {
-            job.setStatus("CLOSED");
-            jobPostingRepository.save(job);
+            List<JobApplication> allApps = jobApplicationRepository.findByJobId(job.getId());
+            long hiredCount = allApps.stream().filter(a -> "HIRED".equalsIgnoreCase(a.getStatus())).count();
+            int totalOpenings = job.getOpenings() > 0 ? job.getOpenings() : 1;
 
-            List<JobApplication> otherApps = jobApplicationRepository.findByJobId(job.getId());
-            for (JobApplication other : otherApps) {
-                if (!other.getId().equals(saved.getId()) && !"HIRED".equalsIgnoreCase(other.getStatus())) {
-                    other.setStatus("REJECTED");
-                    other.setWithdrawalReason("Position filled by another candidate");
-                    jobApplicationRepository.save(other);
+            if (hiredCount >= totalOpenings) {
+                job.setStatus("CLOSED");
+                jobPostingRepository.save(job);
 
-                    CandidateProfile otherCandidate = candidateProfileRepository.findById(other.getCandidateId()).orElse(null);
-                    if (otherCandidate != null) {
-                        Notification notif = Notification.builder()
-                                .userId(otherCandidate.getUserId())
-                                .title("Position Filled: " + job.getTitle())
-                                .message("The role of " + job.getTitle() + " at " + facility.getHospitalName() + " has been filled by another candidate.")
-                                .type("APPLICATION")
-                                .actionUrl("/applications")
-                                .read(false)
-                                .build();
-                        notificationRepository.save(notif);
+                for (JobApplication other : allApps) {
+                    if (!other.getId().equals(saved.getId()) && !"HIRED".equalsIgnoreCase(other.getStatus())) {
+                        other.setStatus("POSITION_FILLED");
+                        other.setWithdrawalReason("All positions filled");
+                        jobApplicationRepository.save(other);
+
+                        CandidateProfile otherCandidate = candidateProfileRepository.findById(other.getCandidateId()).orElse(null);
+                        if (otherCandidate != null) {
+                            Notification notif = Notification.builder()
+                                    .userId(otherCandidate.getUserId())
+                                    .title("Position Filled: " + job.getTitle())
+                                    .message("All " + totalOpenings + " opening(s) for " + job.getTitle() + " at " + facility.getHospitalName() + " have now been filled. Your verified credentials remain active for other clinical openings.")
+                                    .type("APPLICATION")
+                                    .actionUrl("/applications")
+                                    .read(false)
+                                    .build();
+                            notificationRepository.save(notif);
+                        }
                     }
                 }
             }
@@ -251,10 +330,17 @@ public class FacilityJobManagementService {
         // Notify Candidate
         CandidateProfile candidate = candidateProfileRepository.findById(application.getCandidateId()).orElse(null);
         if (candidate != null) {
+            String notifTitle = "REJECTED".equalsIgnoreCase(targetStatus)
+                    ? "Application Update: " + job.getTitle()
+                    : "Application Update: " + targetStatus;
+            String notifMessage = "REJECTED".equalsIgnoreCase(targetStatus)
+                    ? "Thank you for interviewing for " + job.getTitle() + " at " + facility.getHospitalName() + ". At this time, the hospital has decided to proceed with other candidates. Your verified credentials remain active for other hospital openings."
+                    : "Your application for " + job.getTitle() + " at " + facility.getHospitalName() + " has advanced to " + targetStatus + ".";
+
             Notification notification = Notification.builder()
                     .userId(candidate.getUserId())
-                    .title("Application Update: " + targetStatus)
-                    .message("Your application for " + job.getTitle() + " at " + facility.getHospitalName() + " has advanced to " + targetStatus + ".")
+                    .title(notifTitle)
+                    .message(notifMessage)
                     .type("APPLICATION")
                     .actionUrl("/applications")
                     .read(false)
@@ -274,6 +360,7 @@ public class FacilityJobManagementService {
                 .facilityName(facility.getHospitalName())
                 .facilityCity(facility.getCity())
                 .city(job.getCity())
+                .workLocation(job.getCity())
                 .title(job.getTitle())
                 .department(job.getDepartment())
                 .employmentType(job.getEmploymentType())
@@ -389,6 +476,10 @@ public class FacilityJobManagementService {
             shiftStatus = "COMPLETED";
         } else if ("CHECKED_IN".equalsIgnoreCase(claim.getStatus())) {
             shiftStatus = "CHECKED_IN";
+        } else if ("TIMESHEET_SUBMITTED".equalsIgnoreCase(claim.getStatus())) {
+            shiftStatus = "TIMESHEET_SUBMITTED";
+        } else if ("SLOT_FILLED".equalsIgnoreCase(claim.getStatus())) {
+            shiftStatus = "SLOT_FILLED";
         } else {
             shiftStatus = "CLAIMED";
         }
@@ -433,6 +524,9 @@ public class FacilityJobManagementService {
                 .resumeFileName(resumeFileName)
                 .candidateDocuments(docDtos)
                 .status(shiftStatus)
+                .actualHours(claim.getActualHours())
+                .scheduledHours(shift != null ? shift.getHours() : 8)
+                .hourlyRatePaise(shift != null ? shift.getRatePerHour().add(shift.getSurgeRatePerHour() != null ? shift.getSurgeRatePerHour() : BigDecimal.ZERO).multiply(BigDecimal.valueOf(100)).longValue() : 0L)
                 .matchScore(96)
                 .appliedAt(claim.getClaimedAt())
                 .build();

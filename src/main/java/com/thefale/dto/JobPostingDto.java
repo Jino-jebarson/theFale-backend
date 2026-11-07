@@ -28,6 +28,7 @@ public class JobPostingDto {
     private boolean internship;
 
     private String city;
+    private String workLocation;
     private int openings;
     private long salaryMinPaise;
     private long salaryMaxPaise;

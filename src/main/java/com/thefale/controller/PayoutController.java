@@ -38,6 +38,15 @@ public class PayoutController {
         return ResponseEntity.ok(ApiResponse.success(claims));
     }
 
+    @GetMapping({"/me/method", "/payout-methods"})
+    @PreAuthorize("hasRole('CANDIDATE')")
+    @Operation(summary = "Get candidate payout destination bank account or UPI ID")
+    public ResponseEntity<ApiResponse<CandidatePayoutMethodDto>> getPayoutMethod(
+            @AuthenticationPrincipal CustomUserPrincipal principal) {
+        CandidatePayoutMethodDto method = candidateService.getPayoutMethod(principal);
+        return ResponseEntity.ok(ApiResponse.success(method));
+    }
+
     @PostMapping("/me/method")
     @PreAuthorize("hasRole('CANDIDATE')")
     @Operation(summary = "Configure candidate payout destination bank account or UPI ID")
