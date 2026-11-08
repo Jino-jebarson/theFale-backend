@@ -31,6 +31,12 @@ fale:
     local-dir: ${STORAGE_LOCAL_DIR:uploads}
   auth:
     dev-otp-enabled: ${DEV_OTP_ENABLED:true}
+  ai:
+    provider: ${AI_PROVIDER:gemini}
+    gemini:
+      api-key: ${GEMINI_API_KEY:}
+    claude:
+      api-key: ${CLAUDE_API_KEY:}
 
 management:
   endpoints:
