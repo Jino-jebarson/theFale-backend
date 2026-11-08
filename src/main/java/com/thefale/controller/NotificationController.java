@@ -29,7 +29,9 @@ public class NotificationController {
     public ResponseEntity<ApiResponse<List<NotificationDto>>> getNotifications(
             @AuthenticationPrincipal CustomUserPrincipal principal
     ) {
-        List<NotificationDto> notifications = notificationService.getNotifications(principal.getId());
+        String role = principal != null ? principal.getRole() : null;
+        UUID userId = principal != null ? principal.getId() : null;
+        List<NotificationDto> notifications = notificationService.getNotifications(userId, role);
         return ResponseEntity.ok(ApiResponse.success("Notifications fetched successfully", notifications));
     }
 
@@ -50,5 +52,24 @@ public class NotificationController {
     ) {
         notificationService.markAllRead(principal.getId());
         return ResponseEntity.ok(ApiResponse.success("All notifications marked as read"));
+    }
+
+    @DeleteMapping("/{id}")
+    @Operation(summary = "Delete a single notification")
+    public ResponseEntity<ApiResponse<Void>> deleteNotification(
+            @AuthenticationPrincipal CustomUserPrincipal principal,
+            @PathVariable UUID id
+    ) {
+        notificationService.deleteNotification(principal.getId(), id);
+        return ResponseEntity.ok(ApiResponse.success("Notification deleted successfully"));
+    }
+
+    @DeleteMapping({"", "/clear-all", "/clear"})
+    @Operation(summary = "Clear all notifications for the current user")
+    public ResponseEntity<ApiResponse<Void>> clearAllNotifications(
+            @AuthenticationPrincipal CustomUserPrincipal principal
+    ) {
+        notificationService.clearAll(principal.getId());
+        return ResponseEntity.ok(ApiResponse.success("All notifications cleared successfully"));
     }
 }

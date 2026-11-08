@@ -299,6 +299,22 @@ public class ShiftClaimService {
         ShiftClaim saved = shiftClaimRepository.save(claim);
 
         FacilityProfile facility = facilityProfileRepository.findById(shift.getFacilityId()).orElse(null);
+        CandidateProfile candidate = candidateProfileRepository.findById(claim.getCandidateId()).orElse(null);
+
+        // Notify Candidate of Timesheet Verification & Upcoming Escrow Payout
+        if (candidate != null) {
+            String hosp = facility != null ? facility.getHospitalName() : "Hospital Partner";
+            Notification candNotif = Notification.builder()
+                    .userId(candidate.getUserId())
+                    .title("Timesheet Verified — Escrow Auto-Release")
+                    .message(hosp + " approved your duty hours for " + shift.getTitle() + " (" + hoursClaimed + " hrs). Net payout of ₹" + claim.getNetAmount() + " is queued for direct disbursement.")
+                    .type("PAYOUT")
+                    .actionUrl("/earnings")
+                    .read(false)
+                    .build();
+            notificationRepository.save(candNotif);
+        }
+
         auditLogService.logEvent(principal.getId(), "SHIFT_COMPLETED_TDS_VERIFIED", "ShiftClaim", saved.getId().toString(), null);
 
         return mapClaimToDto(saved, shift, facility);

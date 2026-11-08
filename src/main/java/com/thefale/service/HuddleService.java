@@ -34,6 +34,7 @@ public class HuddleService {
     private final MentorApplicationRepository mentorApplicationRepository;
     private final HuddleSessionRepository huddleSessionRepository;
     private final HuddleSessionBookingRepository huddleSessionBookingRepository;
+    private final NotificationRepository notificationRepository;
     private final PhiProtectionService phiProtectionService;
     private final AuditLogService auditLogService;
 
@@ -165,6 +166,20 @@ public class HuddleService {
         post.setUpvotes(post.getUpvotes() + 1);
         HuddlePost saved = huddlePostRepository.save(post);
 
+        // Notify post author if liked by someone else
+        if (!post.getAuthorId().equals(principal.getId())) {
+            String likerName = resolveAuthorName(principal.getId());
+            Notification notif = Notification.builder()
+                    .userId(post.getAuthorId())
+                    .title("New Like on Your Clinical Post")
+                    .message(likerName + " liked your clinical post: \"" + post.getTitle() + "\".")
+                    .type("HUDDLE")
+                    .actionUrl("/huddle")
+                    .read(false)
+                    .build();
+            notificationRepository.save(notif);
+        }
+
         return mapPostToDto(saved);
     }
 
@@ -189,6 +204,20 @@ public class HuddleService {
         auditLogService.logEvent(principal.getId(), "HUDDLE_COMMENT_ADDED", "HuddleComment", saved.getId().toString(), null);
 
         String authorName = resolveAuthorName(principal.getId());
+
+        // Notify post author if replied by someone else
+        if (!post.getAuthorId().equals(principal.getId())) {
+            Notification notif = Notification.builder()
+                    .userId(post.getAuthorId())
+                    .title("New Reply on Your Clinical Discussion")
+                    .message(authorName + " replied to your post: \"" + post.getTitle() + "\".")
+                    .type("HUDDLE")
+                    .actionUrl("/huddle")
+                    .read(false)
+                    .build();
+            notificationRepository.save(notif);
+        }
+
         return HuddleCommentDto.builder()
                 .id(saved.getId())
                 .postId(saved.getPostId())
@@ -337,6 +366,20 @@ public class HuddleService {
         huddleQuestionRepository.save(question);
 
         auditLogService.logEvent(principal.getId(), "HUDDLE_ANSWER_ADDED", "HuddleAnswer", saved.getId().toString(), null);
+
+        // Notify question author when an accredited mentor answers
+        if (!question.getAuthorId().equals(principal.getId())) {
+            String mentorName = resolveAuthorName(principal.getId());
+            Notification notif = Notification.builder()
+                    .userId(question.getAuthorId())
+                    .title("Mentor Answered Your Question")
+                    .message(mentorName + " answered your question: \"" + question.getQuestionText() + "\".")
+                    .type("HUDDLE")
+                    .actionUrl("/huddle")
+                    .read(false)
+                    .build();
+            notificationRepository.save(notif);
+        }
 
         return HuddleAnswerDto.builder()
                 .id(saved.getId())

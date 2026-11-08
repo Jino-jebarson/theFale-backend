@@ -26,6 +26,7 @@ import java.util.UUID;
 public class AdminController {
 
     private final AdminService adminService;
+    private final com.thefale.service.SupportService supportService;
 
     @GetMapping({"/dashboard", "/metrics"})
     @Operation(summary = "Get admin dashboard KPI metrics")
@@ -384,5 +385,23 @@ public class AdminController {
             @RequestBody MentorApplicationDto request) {
         MentorApplicationDto app = adminService.onboardMentor(principal, request);
         return ResponseEntity.ok(ApiResponse.success("Clinical mentor certified and added to directory", app));
+    }
+
+    @GetMapping("/support/tickets")
+    @Operation(summary = "Get all support tickets for admin help desk")
+    public ResponseEntity<ApiResponse<List<SupportTicketDto>>> getAllSupportTickets(
+            @RequestParam(required = false) String status) {
+        List<SupportTicketDto> tickets = supportService.getAllTickets(status);
+        return ResponseEntity.ok(ApiResponse.success("Support tickets fetched successfully", tickets));
+    }
+
+    @PutMapping("/support/tickets/{id}/status")
+    @Operation(summary = "Update support ticket status and admin resolution notes")
+    public ResponseEntity<ApiResponse<SupportTicketDto>> updateSupportTicketStatus(
+            @AuthenticationPrincipal CustomUserPrincipal principal,
+            @PathVariable UUID id,
+            @RequestBody UpdateSupportTicketStatusRequest request) {
+        SupportTicketDto ticket = supportService.updateTicketStatus(principal, id, request);
+        return ResponseEntity.ok(ApiResponse.success("Support ticket updated successfully", ticket));
     }
 }

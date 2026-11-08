@@ -116,11 +116,16 @@ public class CandidateController {
     @Operation(summary = "Upload candidate document metadata")
     public ResponseEntity<ApiResponse<CandidateDocumentDto>> uploadDocument(
             @AuthenticationPrincipal CustomUserPrincipal principal,
-            @RequestParam String documentType,
-            @RequestParam String originalFileName,
-            @RequestParam String fileUrl
+            @RequestBody(required = false) CandidateDocumentUploadRequest body,
+            @RequestParam(required = false) String documentType,
+            @RequestParam(required = false) String originalFileName,
+            @RequestParam(required = false) String fileUrl
     ) {
-        CandidateDocumentDto doc = candidateService.recordDocument(principal, documentType, originalFileName, fileUrl);
+        String finalType = body != null && body.getDocumentType() != null ? body.getDocumentType() : documentType;
+        String finalName = body != null && body.getOriginalFileName() != null ? body.getOriginalFileName() : originalFileName;
+        String finalUrl = body != null && body.getFileUrl() != null ? body.getFileUrl() : fileUrl;
+
+        CandidateDocumentDto doc = candidateService.recordDocument(principal, finalType, finalName, finalUrl);
         return ResponseEntity.ok(ApiResponse.success("Document uploaded successfully", doc));
     }
 

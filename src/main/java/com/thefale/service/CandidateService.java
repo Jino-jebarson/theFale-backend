@@ -32,6 +32,7 @@ public class CandidateService {
     private final CandidatePayoutMethodRepository payoutMethodRepository;
     private final StudentUpgradeRequestRepository upgradeRequestRepository;
     private final CandidateProfileViewRepository profileViewRepository;
+    private final NotificationRepository notificationRepository;
     private final AuditLogService auditLogService;
     private final ObjectMapper objectMapper;
 
@@ -426,6 +427,15 @@ public class CandidateService {
         CandidateProfile profile = profileRepository.findByUserId(principal.getId())
                 .orElseThrow(() -> new ResourceNotFoundException("Candidate profile not found"));
 
+        if ("PHOTO".equalsIgnoreCase(documentType)) {
+            List<CandidateDocument> existingPhotos = documentRepository.findByCandidateId(profile.getId()).stream()
+                    .filter(d -> "PHOTO".equalsIgnoreCase(d.getDocumentType()))
+                    .toList();
+            if (!existingPhotos.isEmpty()) {
+                documentRepository.deleteAll(existingPhotos);
+            }
+        }
+
         CandidateDocument doc = CandidateDocument.builder()
                 .candidateId(profile.getId())
                 .documentType(documentType)
@@ -580,11 +590,26 @@ public class CandidateService {
 
     @Transactional
     public void recordProfileView(UUID candidateId, UUID facilityId, String facilityName) {
+        String fac = facilityName != null && !facilityName.isBlank() ? facilityName : "Partner Healthcare Facility";
         CandidateProfileView view = CandidateProfileView.builder()
                 .candidateId(candidateId)
                 .facilityId(facilityId)
-                .facilityName(facilityName != null && !facilityName.isBlank() ? facilityName : "Partner Healthcare Facility")
+                .facilityName(fac)
                 .build();
         profileViewRepository.save(view);
+
+        // Send real-time institutional profile view alert to candidate
+        CandidateProfile candidate = profileRepository.findById(candidateId).orElse(null);
+        if (candidate != null) {
+            Notification notif = Notification.builder()
+                    .userId(candidate.getUserId())
+                    .title("Profile Viewed by " + fac)
+                    .message(fac + " reviewed your verified clinical CV and credentials.")
+                    .type("PROFILE_VIEW")
+                    .actionUrl("/profile")
+                    .read(false)
+                    .build();
+            notificationRepository.save(notif);
+        }
     }
 }

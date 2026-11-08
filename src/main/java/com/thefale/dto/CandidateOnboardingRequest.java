@@ -1,5 +1,6 @@
 package com.thefale.dto;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonSetter;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -23,6 +24,7 @@ public class CandidateOnboardingRequest {
 
     @NotBlank(message = "Full name is required")
     @jakarta.validation.constraints.Size(max = 150, message = "Full name must not exceed 150 characters")
+    @JsonAlias({"name", "candidateName"})
     private String fullName;
 
     private String email;
@@ -42,6 +44,7 @@ public class CandidateOnboardingRequest {
 
     // Student fields
     private String course;
+    @JsonAlias({"college", "collegeName"})
     private String collegeName;
     private String studyYear; // 1st, 2nd, 3rd, 4th, Intern
     private String universityRegNo;
@@ -49,10 +52,12 @@ public class CandidateOnboardingRequest {
 
     // Graduate fields
     private String profession;
+    @JsonAlias({"specialty", "primarySpecialty"})
     private String primarySpecialty;
     private List<String> subSpecialties;
     private String qualification;
     private String council;
+    @JsonAlias({"regNumber", "registrationNumber", "councilRegistrationNumber"})
     private String councilRegistrationNumber;
     private String councilState;
     private String regYear;

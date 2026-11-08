@@ -365,6 +365,27 @@ public class AdminService {
             notificationRepository.save(notif);
         }
 
+        // Notify matching candidates of new approved role (Smart AI Match)
+        if (approved) {
+            List<CandidateProfile> candidates = candidateProfileRepository.findAll();
+            for (CandidateProfile c : candidates) {
+                boolean matchesSpecialty = (c.getSpecialty() != null && posting.getDepartment() != null &&
+                        c.getSpecialty().toLowerCase().contains(posting.getDepartment().toLowerCase()))
+                        || (c.getProfession() != null && posting.getTitle().toLowerCase().contains(c.getProfession().toLowerCase()));
+                if (matchesSpecialty) {
+                    Notification matchNotif = Notification.builder()
+                            .userId(c.getUserId())
+                            .title("Smart AI Match: " + posting.getTitle())
+                            .message((facility != null ? facility.getHospitalName() : "Partner Hospital") + " posted a new opening matching your clinical specialty in " + (posting.getCity() != null ? posting.getCity() : "your region") + ".")
+                            .type("JOB_MATCH")
+                            .actionUrl("/jobs")
+                            .read(false)
+                            .build();
+                    notificationRepository.save(matchNotif);
+                }
+            }
+        }
+
         auditLogService.logEvent(principal.getId(), "ADMIN_POSTING_REVIEWED", "JobPosting", postingId.toString(), null);
     }
 
@@ -825,6 +846,28 @@ public class AdminService {
                         .build();
                 notificationRepository.save(notif);
             }
+
+            // Urgent On-Call Shift Broadcast to local clinicians
+            if (facility != null && (shift.isUrgent() || (shift.getSurgeRatePerHour() != null && shift.getSurgeRatePerHour().compareTo(BigDecimal.ZERO) > 0))) {
+                String surgeInfo = shift.getSurgeLabel() != null && !shift.getSurgeLabel().isBlank()
+                        ? " (" + shift.getSurgeLabel() + " +₹" + shift.getSurgeRatePerHour() + "/hr surge)"
+                        : "";
+                List<CandidateProfile> localCandidates = candidateProfileRepository.findAll();
+                for (CandidateProfile cand : localCandidates) {
+                    if (cand.getCity() != null && cand.getCity().equalsIgnoreCase(facility.getCity())) {
+                        Notification urgentNotif = Notification.builder()
+                                .userId(cand.getUserId())
+                                .title("⚡ Urgent On-Call Shift: " + shift.getTitle())
+                                .message(facility.getHospitalName() + " posted an emergency duty: " + shift.getTitle() + surgeInfo + " in " + facility.getCity() + ". Guaranteed escrow payout.")
+                                .type("SHIFT_URGENT")
+                                .actionUrl("/shifts")
+                                .read(false)
+                                .build();
+                        notificationRepository.save(urgentNotif);
+                    }
+                }
+            }
+
             auditLogService.logEvent(principal.getId(), "ADMIN_SHIFT_APPROVED", "LocumShift", shiftId.toString(), null);
         } else {
             shift.setStatus("REJECTED");

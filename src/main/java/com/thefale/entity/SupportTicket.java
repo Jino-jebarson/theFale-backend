@@ -36,6 +36,9 @@ public class SupportTicket {
     @Column(nullable = false, length = 30)
     private String status = "OPEN"; // OPEN, IN_PROGRESS, RESOLVED, CLOSED
 
+    @Column(name = "admin_notes", columnDefinition = "TEXT")
+    private String adminNotes;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;

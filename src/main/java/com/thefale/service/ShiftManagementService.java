@@ -35,6 +35,7 @@ public class ShiftManagementService {
     private final MinimumRoleRateRepository minimumRoleRateRepository;
     private final CandidateProfileRepository candidateProfileRepository;
     private final HospitalBankAccountRepository hospitalBankAccountRepository;
+    private final NotificationRepository notificationRepository;
     private final AuditLogService auditLogService;
 
     @Transactional
@@ -104,6 +105,19 @@ public class ShiftManagementService {
                 .subtitle(request.getOpenings() + " slot(s) · " + hours + " hrs @ ₹" + (baseRateRupees.add(surgeRateRupees)) + "/hr")
                 .build();
         walletTransactionRepository.save(tx);
+
+        // Low Escrow Balance Alert if balance falls below statutory threshold
+        if (wallet.getAvailableBalance().compareTo(new BigDecimal("10000")) < 0) {
+            Notification lowBalNotif = Notification.builder()
+                    .userId(facility.getUserId())
+                    .title("Low Escrow Reserve Alert")
+                    .message("Your available wallet balance is ₹" + wallet.getAvailableBalance() + ". Top up your escrow reserve to ensure future locum shifts can be broadcast.")
+                    .type("WALLET")
+                    .actionUrl("/employer/wallet")
+                    .read(false)
+                    .build();
+            notificationRepository.save(lowBalNotif);
+        }
 
         LocumShift shift = LocumShift.builder()
                 .facilityId(facility.getId())
