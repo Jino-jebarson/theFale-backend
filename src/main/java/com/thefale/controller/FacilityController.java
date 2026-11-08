@@ -7,7 +7,7 @@ import com.thefale.dto.FacilityOnboardingRequest;
 import com.thefale.dto.FacilityProfileDto;
 import com.thefale.dto.HospitalBankAccountDto;
 import com.thefale.dto.UpdateHospitalBankRequest;
-import com.thefale.security.CustomUserPrincipal;
+import com.thefale.security.CustomUserPrincipal;  
 import com.thefale.service.FacilityService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
