@@ -857,7 +857,7 @@ public class AdminService {
                     if (cand.getCity() != null && cand.getCity().equalsIgnoreCase(facility.getCity())) {
                         Notification urgentNotif = Notification.builder()
                                 .userId(cand.getUserId())
-                                .title("⚡ Urgent On-Call Shift: " + shift.getTitle())
+                                .title("Urgent On-Call Shift: " + shift.getTitle())
                                 .message(facility.getHospitalName() + " posted an emergency duty: " + shift.getTitle() + surgeInfo + " in " + facility.getCity() + ". Guaranteed escrow payout.")
                                 .type("SHIFT_URGENT")
                                 .actionUrl("/shifts")

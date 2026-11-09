@@ -15,6 +15,7 @@ import java.util.UUID;
 public class HospitalBankAccountDto {
     private UUID id;
     private String bankName;
+    private String accountNumber;
     private String accountNumberMasked;
     private String accountNumberLast4;
     private String ifsc;

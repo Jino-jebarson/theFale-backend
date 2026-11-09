@@ -521,9 +521,15 @@ public class FacilityService {
     }
 
     private HospitalBankAccountDto mapBankToDto(HospitalBankAccount b) {
+        String fullAccount = b.getAccountNumberEncrypted();
+        if (fullAccount != null && fullAccount.startsWith("ENC_")) {
+            fullAccount = fullAccount.substring(4);
+        }
+
         return HospitalBankAccountDto.builder()
                 .id(b.getId())
                 .bankName(b.getBankName())
+                .accountNumber(fullAccount)
                 .accountNumberMasked("•••• •••• " + b.getAccountNumberLast4())
                 .accountNumberLast4(b.getAccountNumberLast4())
                 .ifsc(b.getIfsc())

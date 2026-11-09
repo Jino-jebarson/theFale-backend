@@ -9,6 +9,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
 
@@ -70,7 +73,7 @@ public class AiService {
                             .response(cleanOutput)
                             .structuredData(structuredMap)
                             .action(inferAction(request.getTask(), cleanOutput))
-                            .suggestions(buildSuggestions(request.getTask()))
+                            .suggestions(buildSuggestions(request))
                             .build();
                 }
             } catch (Exception e) {
@@ -84,6 +87,7 @@ public class AiService {
 
     private boolean isJsonTask(String task) {
         return "resume_parse".equalsIgnoreCase(task)
+                || "kyc_precheck".equalsIgnoreCase(task)
                 || "whatsapp_post_shift".equalsIgnoreCase(task)
                 || "shift_pay_suggest".equalsIgnoreCase(task)
                 || "shift_pay_suggestion".equalsIgnoreCase(task);
@@ -104,6 +108,68 @@ public class AiService {
 
     private String buildUserPrompt(AiRequestDto request) {
         String prompt = request.getPrompt() != null ? request.getPrompt().trim() : "";
+        String task = request.getTask() != null ? request.getTask().trim().toLowerCase() : "";
+
+        if ("bio_writer".equals(task) || "profile_summary".equals(task)) {
+            if (!prompt.isEmpty()) {
+                StringBuilder sb = new StringBuilder("Clinician's Exact Input Notes: \"").append(prompt).append("\"");
+                if (request.getMetadata() != null && !request.getMetadata().isEmpty()) {
+                    Map<String, Object> m = request.getMetadata();
+                    Object r = m.get("role");
+                    Object q = m.get("qualification");
+                    Object c = m.get("council");
+                    Object reg = m.get("regNumber");
+                    if (r != null && !r.toString().isBlank()) sb.append("\nCadre / Role: ").append(r);
+                    if (q != null && !q.toString().isBlank()) sb.append("\nDegree / Qualification: ").append(q);
+                    if (c != null && !c.toString().isBlank()) sb.append("\nStatutory Council: ").append(c);
+                    if (reg != null && !reg.toString().isBlank()) sb.append("\nRegistration No: ").append(reg);
+                }
+                sb.append("\n\nTask: Synthesize and elevate the clinician's notes into a crisp, high-impact 2-sentence first-person clinical summary for hospital recruiters. Strictly respect the candidate's exact stated name, years of experience, and details. Never assume or add unmentioned degrees.");
+                return sb.toString();
+            }
+        }
+
+        if ("jd_writer".equals(task) || "post_job_desc".equals(task)) {
+            StringBuilder sb = new StringBuilder("Requisition Title / Role: ").append(prompt.isEmpty() ? "Clinical Role" : prompt);
+            if (request.getMetadata() != null && !request.getMetadata().isEmpty()) {
+                Map<String, Object> m = request.getMetadata();
+                Object dept = m.get("department");
+                Object exp = m.get("experience");
+                Object minSal = m.get("minSalary");
+                Object maxSal = m.get("maxSalary");
+                Object shifts = m.get("shifts");
+                Object empType = m.get("empType");
+                Object location = m.get("location");
+                Object openings = m.get("openings");
+
+                if (dept != null && !dept.toString().isBlank()) sb.append("\nDepartment: ").append(dept);
+                if (exp != null && !exp.toString().isBlank()) sb.append("\nRequired Experience: ").append(exp);
+                if ((minSal != null && !minSal.toString().isBlank()) || (maxSal != null && !maxSal.toString().isBlank())) {
+                    sb.append("\nMonthly Salary Range: ₹").append(minSal != null ? minSal : "0").append(" – ₹").append(maxSal != null ? maxSal : "Negotiable").append(" / month");
+                }
+                if (shifts != null && !shifts.toString().isBlank()) sb.append("\nShift Schedule: ").append(shifts);
+                if (empType != null && !empType.toString().isBlank()) sb.append("\nEmployment Nature: ").append(empType);
+                if (location != null && !location.toString().isBlank()) sb.append("\nHospital Location: ").append(location);
+                if (openings != null && !openings.toString().isBlank()) sb.append("\nVacancies: ").append(openings);
+            }
+            sb.append("\n\nTask: Generate an authentic NABH-compliant hospital job description. Explicitly incorporate the exact user-specified experience level (e.g. Fresher), shift schedule (e.g. Day, Night), and monthly salary range without inventing arbitrary static numbers.");
+            return sb.toString();
+        }
+
+        if ("candidate_summary".equals(task)) {
+            StringBuilder sb = new StringBuilder(prompt.isEmpty() ? "Candidate Clinical Review" : prompt);
+            if (request.getMetadata() != null && !request.getMetadata().isEmpty()) {
+                Map<String, Object> m = request.getMetadata();
+                if (m.containsKey("matchScore")) sb.append("\nCalculated Clinical Match Score: ").append(m.get("matchScore")).append("%");
+                if (m.containsKey("appliedFor")) sb.append("\nApplied Position: ").append(m.get("appliedFor"));
+                if (m.containsKey("role")) sb.append("\nCandidate Base Role: ").append(m.get("role"));
+                if (m.containsKey("skills")) sb.append("\nDocumented Skills: ").append(m.get("skills"));
+                if (m.containsKey("city")) sb.append("\nLocation: ").append(m.get("city"));
+                if (m.containsKey("verified")) sb.append("\nCouncil Standing: ").append(Boolean.parseBoolean(String.valueOf(m.get("verified"))) ? "State Council Verified" : "MCI/KMC Registered");
+            }
+            return sb.toString();
+        }
+
         if (request.getMetadata() != null && !request.getMetadata().isEmpty()) {
             return prompt + "\n\nContext Metadata: " + request.getMetadata().toString();
         }
@@ -113,6 +179,28 @@ public class AiService {
     private String buildSystemPrompt(AiRequestDto request) {
         String task = request.getTask() != null ? request.getTask().trim().toLowerCase() : "ally_chat";
         String lang = request.getLanguage() != null ? request.getLanguage() : "English";
+
+        // Dynamic Real-Time Temporal Context (IST / India)
+        ZonedDateTime now = ZonedDateTime.now(ZoneId.of("Asia/Kolkata"));
+        String todayFormatted = now.format(DateTimeFormatter.ofPattern("EEEE, MMMM d, yyyy"));
+        String tomorrowFormatted = now.plusDays(1).format(DateTimeFormatter.ofPattern("EEEE, MMMM d, yyyy"));
+        String timeFormatted = now.format(DateTimeFormatter.ofPattern("h:mm a z"));
+
+        String temporalHeader = "CURRENT LIVE DATE & TIME IN INDIA: Today is " + todayFormatted + " (Current Time: " + timeFormatted + "). " +
+                "Tomorrow is " + tomorrowFormatted + ". Yesterday was " + now.minusDays(1).format(DateTimeFormatter.ofPattern("EEEE, MMMM d, yyyy")) + ".\n" +
+                "CRITICAL TEMPORAL REALISM: You possess real-time temporal awareness. Whenever answering questions about 'today', 'tomorrow', 'yesterday', days of the week, shifts, or dates, you MUST calculate them accurately relative to this live date (" +
+                todayFormatted + "). Tomorrow is strictly " + tomorrowFormatted + ". Never hallucinate past training cutoff dates (such as 2023 or 2024) or state that you lack real-time information.\n\n";
+
+        // Determine active user role persona dynamically
+        String rawRole = request.getRole();
+        if (rawRole == null && request.getMetadata() != null) {
+            Object r = request.getMetadata().get("activeRole");
+            if (r == null) r = request.getMetadata().get("role");
+            if (r != null) rawRole = r.toString();
+        }
+        String normalizedRole = rawRole != null ? rawRole.trim().toLowerCase() : "clinician";
+        if ("facility".equals(normalizedRole)) normalizedRole = "hospital";
+        if ("professional".equals(normalizedRole)) normalizedRole = "clinician";
 
         return switch (task) {
             case "resume_parse" ->
@@ -128,27 +216,43 @@ public class AiService {
                     "If a value is not found in the text, use null or empty string. Output ONLY the raw valid JSON object without any markdown code fences or conversational text.";
 
             case "whatsapp_post_shift" ->
-                    "You are an automated hospital locum coordinator in India. Parse the unstructured WhatsApp message into a valid JSON object with keys: " +
-                    "\"title\" (standard clinical role e.g. 'ICU Staff Nurse', 'Emergency Medical Officer', 'OT Technician'), " +
-                    "\"department\" (hospital department e.g. 'Critical care', 'Emergency / Trauma', 'Dialysis & Renal'), " +
+                    "You are Ally, an automated hospital locum coordinator in India. Parse the unstructured WhatsApp shift request into a valid raw JSON object. " +
+                    "Extract ONLY from the given text without fabricating dummy numbers. Return exact JSON with keys: " +
+                    "\"title\" (standard clinical role e.g. 'ICU Staff Nurse', 'Casualty Medical Officer', 'OT Technician'), " +
+                    "\"department\" (hospital department e.g. 'Critical care', 'Emergency / Trauma', 'Dialysis & Renal', 'Operation Theatre', 'General Medicine'), " +
                     "\"shiftType\" ('MORNING', 'EVENING', 'NIGHT', or 'CUSTOM'), " +
-                    "\"requiredCount\" (integer number of staff needed), " +
-                    "\"ratePerShift\" (total shift pay in INR integer), " +
-                    "\"hourlyRate\" (hourly rate in INR integer), " +
-                    "\"location\" (hospital locality or area, e.g. 'Koramangala'), " +
-                    "\"notes\" (concise clinical notes or specific shift requirements). " +
-                    "Output ONLY raw valid JSON without markdown fences.";
+                    "\"requiredCount\" (integer number of staff needed, or null if not mentioned), " +
+                    "\"ratePerShift\" (total shift pay in INR integer, or null if only hourly rate is given), " +
+                    "\"hourlyRate\" (hourly rate in INR integer, or null if only shift rate is given), " +
+                    "\"city\" (Indian city e.g. 'Bengaluru', 'Chennai', 'Mumbai', 'Hyderabad', or null), " +
+                    "\"location\" (hospital locality, floor, or unit e.g. '3rd Floor ICU', 'Koramangala', or null), " +
+                    "\"date\" (shift date in YYYY-MM-DD or 'today' / 'tomorrow' if mentioned, else null), " +
+                    "\"isUrgent\" (boolean, true if urgent / immediate / SOS / emergency is mentioned, else false), " +
+                    "\"supervisorName\" (name of Sister In-charge, Nursing Supdt, or Doctor contact mentioned, else null), " +
+                    "\"supervisorPhone\" (phone number or extension digits mentioned, else null), " +
+                    "\"perks\" (array of strings for perks mentioned, e.g. [\"Duty Meals Provided\", \"Duty Room / Rest Area\", \"Travel Allowance / Cab Provided\"]), " +
+                    "\"notes\" (clinical instructions, specific equipment, or reporting notes mentioned, else null). " +
+                    "Output ONLY raw valid JSON without markdown fences, explanation, or conversational filler.";
 
             case "post_job_desc", "jd_writer" ->
-                    "You are a hospital recruiter in India. Create a professional, NABH-compliant Job Description for the requested clinical role. " +
-                    "Structure into: 1. Role Overview, 2. Clinical Responsibilities, 3. Statutory Council & Accreditation Requirements (e.g. KMC, KSNC), 4. Shift Telemetry & Safety SOPs. Maintain professional healthcare tone with zero emojis.";
+                    "You are Ally, a hospital recruiter copilot for FALE Healthcare in India. Create a professional, NABH-compliant Job Description for the requested clinical role. " +
+                    "Output in clean plain text with ZERO markdown asterisks (strictly do NOT use ** or ### or markdown bolding). " +
+                    "CRITICAL: Strictly incorporate the exact user-provided parameters (department, experience level, salary range, shift roster, employment type). Do NOT use static or default fallback numbers when user data is provided. " +
+                    "Structure clearly into:\n" +
+                    "1. ROLE OVERVIEW:\n[2-3 concise clinical sentences including department, employment type, and clinical scope]\n\n" +
+                    "2. KEY CLINICAL RESPONSIBILITIES:\n• [bulleted key clinical duties]\n\n" +
+                    "3. STATUTORY & COUNCIL REQUIREMENTS:\n• [qualifications and active State Council / NMC registration]\n• Experience: [strictly state the user-provided experience level e.g. Fresher, 2-5 yrs]\n\n" +
+                    "4. SHIFT ROSTER & COMPENSATION PROTOCOLS:\n• Shift Schedule: [strictly state the user-provided shifts e.g. Day, Night]\n• Monthly Remuneration: [strictly state the user-provided salary range e.g. ₹20,000 – ₹4,50,000 / month]\n• Standardized clinical handovers, EMR documentation, and NABH patient safety guidelines.\n" +
+                    "Maintain professional healthcare tone with zero emojis and zero markdown markup.";
 
             case "bio_writer", "profile_summary" ->
-                    "You are an executive healthcare medical editor for FALE. " +
-                    "If the input contains an existing draft bio or clinical notes, condense, polish, and elevate it into a crisp, high-impact 2-to-3 sentence clinical biography for hospital recruiters. " +
-                    "Preserve all specific degrees (e.g., MBBS, GNM, B.Sc Nursing, MD), council names (e.g., KMC, KSNC, TNMC), and registration license numbers provided. " +
-                    "Write in professional, first-person clinical resume tone (e.g., 'MBBS practitioner registered with TNMC...'). " +
-                    "If the input is long or detailed (even 500-1000+ words), synthesize the key competencies into a concise executive summary. No emojis.";
+                    "You are Ally, an executive clinical editorial copilot for FALE Healthcare in India. " +
+                    "Your objective is to craft an authentic, high-impact, 2-to-3 sentence first-person clinical biography for hospital recruitment directors and department heads. " +
+                    "CRITICAL GENERATION RULES: " +
+                    "1. USER INPUT FIRST: If the user provided draft notes or raw input, your primary duty is to polish and elevate their exact stated background, experience, specialty, and qualifications into a fluent clinical summary. Strictly never override the user's stated clinical background with assumed roles or arbitrary numbers. " +
+                    "2. CADRE ACCURACY: Strictly adhere to the candidate's actual profession, qualification, and specialty provided in the prompt/context (e.g., Nurse, Physician, Physiotherapist, Pharmacist, Lab Technician). Never call a nurse a doctor or assume degrees that were not specified. " +
+                    "3. CLINICAL SUBSTANCE: Emphasize practical healthcare duties (e.g., acute patient triage, bedside management, NABH protocol adherence, sterile procedure execution, and interdisciplinary collaboration). " +
+                    "4. STYLE: Confident, polished, first-person clinical resume tone. Strictly zero emojis, zero generic conversational filler, and strictly no repetitive hardcoded templates.";
 
             case "why_this_job" ->
                     "You are a clinical career mentor for FALE Healthcare in India. " +
@@ -160,11 +264,12 @@ public class AiService {
                     "Zero emojis.";
 
             case "candidate_summary" ->
-                    "You are a medical director reviewing job applicants. Provide a 3-bullet clinical snapshot of this candidate covering: " +
+                    "You are a medical director reviewing job applicants for FALE Healthcare in India. Provide a 3-bullet clinical snapshot of this candidate covering: " +
                     "1) Unit Competence & Practical Skills tailored specifically to their applied position and documented skills, " +
                     "2) Statutory Council Standing & Verification in their city, " +
                     "3) Alignment with the specific applied shift and duty reliability. " +
-                    "Format each bullet to start with • and keep strictly zero emojis.";
+                    "CRITICAL CLINICAL RULE: If the match score is low (< 70%) or there is a statutory cadre mismatch (e.g. Doctor applying for Nurse shift), explicitly state the statutory discrepancy in bullet 3 and recommend supervisory review. If match score is high (>= 70%), state high clinical suitability. " +
+                    "Format each bullet to start with •, keep strictly zero emojis, and strictly zero markdown bold asterisks.";
 
             case "candidate_interview_questions", "interview_questions" ->
                     "You are a senior clinical examiner at an NABH-accredited tertiary care hospital in India. " +
@@ -185,11 +290,12 @@ public class AiService {
                     "You are an accredited CME Clinical Tutor. Explain the evidence-based medical protocol and institutional rationale for the given question. Quote relevant guidelines (e.g., NABH, CDC, WHO 5-Moments) and explain why the correct choice preserves patient safety. Professional clinical tone, strictly zero emojis.";
 
             case "shift_pay_suggestion", "shift_pay_suggest" ->
-                    "You are a healthcare staffing financial analyst in India. Analyze the clinical specialty, timing (day/night), and emergency surge. " +
-                    "Provide a realistic market pay benchmark in valid JSON with keys: " +
+                    "You are a healthcare staffing financial analyst in India. Analyze the clinical specialty, timing (day/night), and locality. " +
+                    "Calculate a realistic market pay benchmark in valid JSON with keys: " +
                     "\"recommendedHourlyRate\" (integer in INR), " +
-                    "\"typicalMinHourlyRate\" (integer in INR), " +
-                    "\"typicalMaxHourlyRate\" (integer in INR), " +
+                    "\"minHourlyRate\" (integer in INR), " +
+                    "\"maxHourlyRate\" (integer in INR), " +
+                    "\"fillTimeEstimateMinutes\" (integer minutes e.g. 25), " +
                     "\"explanation\" (1 concise sentence explaining the benchmark rationale with zero emojis). " +
                     "Output ONLY raw valid JSON without markdown fences.";
 
@@ -234,12 +340,18 @@ public class AiService {
                     "Keep it professional, clinical, objective, and strictly zero emojis.";
 
             case "kyc_precheck", "doc_verify" ->
-                    "You are an AI statutory credential auditor for Indian healthcare boards (KMC, KSNC, TNMC, NMC). " +
-                    "Analyze the provided candidate name, council, role, and registration number. " +
-                    "Provide a clean, concise 2-sentence compliance assessment: " +
-                    "Sentence 1: State whether the registration number format and nomenclature adhere to that council's statutory pattern. " +
-                    "Sentence 2: Confirm name alignment with state medical registry standards and standing for clinical posting. " +
-                    "Do NOT output markdown titles, headings, asterisks, bullet lists, or horizontal rules. Keep it plain, professional clinical prose with zero emojis.";
+                    "You are an AI statutory credential auditor for Indian healthcare regulatory boards (NMC, KMC, INC, KSNC, TNMC, PCI, DCI, NCAHP). " +
+                    "Audit the provided candidate name, council, role, and registration number strictly against official Indian statutory nomenclature. " +
+                    "CRITICAL AUDIT RULES: " +
+                    "1. For Indian Nursing Council (INC / NUID): A valid registration MUST have an official state council prefix and year (e.g. KSNC-2019-XXXXX, TNC/RN/XXXX, KNC-XXXX) or a 14-digit national NUID. Plain random digits like '728282' or '123456' lack statutory nomenclature and MUST be marked formatValid=false and status='FLAGGED_DISCREPANCY' with confidence <= 40. " +
+                    "2. For Medical Councils (NMC/KMC/TNMC/MMC): Plain numbers without council prefix or standard alphanumeric format MUST be marked formatValid=false and status='FLAGGED_DISCREPANCY'. " +
+                    "3. Return ONLY a valid JSON object with the following keys: " +
+                    "\"status\": (\"CLEAR\" or \"FLAGGED_DISCREPANCY\"), " +
+                    "\"formatValid\": (boolean), " +
+                    "\"confidence\": (integer percentage 0-100), " +
+                    "\"assessment\": (concise 2-sentence clinical compliance explanation, stating clearly whether the number follows statutory nomenclature or lacks council prefix), " +
+                    "\"recommendation\": (actionable instruction for the clinician or compliance desk). " +
+                    "Do NOT output markdown fences, titles, or conversational text. Return ONLY the raw valid JSON.";
 
             case "huddle_moderate" ->
                     "You are a clinical community safety moderator for FALE Huddle. Evaluate the post text for: 1) Protected Health Information (UHID, MRD, patient identities), 2) Commercial recruiter phone number spam (+91/WhatsApp solicitation), 3) Harassment. Return a status (SAFE or FLAGGED) and 1 sentence moderation rationale.";
@@ -251,15 +363,36 @@ public class AiService {
                     "You are the FALE Chief Operations Officer. Write a concise morning operations brief covering: 1) Pending Council Verifications requiring review, 2) Urgent unfilled hospital shifts for today, 3) Priority candidate support queries.";
 
             case "demand_forecast" ->
-                    "You are a predictive clinical workforce analyst in India. Generate a 7-day surge demand forecast across ICU, Emergency, OT, and General Wards, identifying peak weekend locum requirements and staffing recommendations.";
+                    temporalHeader + "You are a predictive clinical workforce analyst in India. Generate a 7-day surge demand forecast across ICU, Emergency, OT, and General Wards, identifying peak weekend locum requirements and staffing recommendations.";
 
             case "translate_chat" ->
                     "Translate the provided text into the requested Indian language (" + lang + ") with accurate medical terminology and respectful professional tone.";
 
-            default ->
-                    "You are Ally, the clinical AI assistant for FALE (Flexible Allied Locum & Employment Network in India). " +
-                    "You assist doctors, nurses, and paramedical staff with locum shifts, KMC/KSNC council credentials, and guaranteed Escrow payouts. " +
-                    "Be concise, respectful, empathetic, and professional. Zero emojis. Output language: " + lang + ".";
+            default -> {
+                String roleInstructions = switch (normalizedRole) {
+                    case "hospital" ->
+                        "You are Ally, the Hospital Staffing & Escrow Copilot for FALE Healthcare in India. " +
+                        "You are currently assisting a verified Hospital Administrator, HR Director, Medical Superintendent, or Recruiter. " +
+                        "Assist them with posting urgent doctor/nurse locum shifts, sourcing verified duty clinicians with authentic KMC/INC registrations, managing hospital escrow deposits and 24-hour settlements, and reviewing candidate credentials. " +
+                        "Never address the user as a job applicant or clinician. Address hospital staffing and compliance matters with executive precision.";
+
+                    case "student" ->
+                        "You are Ally, the dedicated FALE Student & Junior Clinical Copilot for medical, nursing, and paramedical students in India. " +
+                        "Assist students with clinical observerships, junior internship shifts at accredited teaching hospitals, State Council licensure exam prep (KMC, KSNC, NMC), and medical mentorship in Huddle. " +
+                        "Keep answers encouraging, academically rigorous, concise, and helpful.";
+
+                    case "admin" ->
+                        "You are Ally, the Platform Operations & Compliance Copilot for the FALE internal operations team in India. " +
+                        "Assist administrators with candidate KYC state council verification queues, hospital statutory Clinical Establishments Act (CEA) approvals, shift wage parity compliance, and escrow dispute resolutions. " +
+                        "Keep answers objective, analytical, concise, and protocol-driven.";
+
+                    default ->
+                        "You are Ally, the clinical career AI assistant for FALE (Flexible Allied Locum & Employment Network in India). " +
+                        "You assist verified doctors, nurses, and paramedical professionals with locum shifts, KMC/KSNC council credentials, and guaranteed Escrow payouts. " +
+                        "Be concise, respectful, empathetic, and professional.";
+                };
+                yield temporalHeader + roleInstructions + " Zero emojis. Output language: " + lang + ".";
+            }
         };
     }
 
@@ -277,8 +410,25 @@ public class AiService {
         return null;
     }
 
-    private List<String> buildSuggestions(String task) {
-        return switch (task != null ? task.toLowerCase() : "") {
+    private List<String> buildSuggestions(AiRequestDto request) {
+        String task = request != null && request.getTask() != null ? request.getTask().toLowerCase() : "";
+        if ("ally_chat".equals(task) || "chat".equals(task)) {
+            String r = request.getRole() != null ? request.getRole().toLowerCase() : "";
+            if (request.getMetadata() != null && request.getMetadata().get("activeRole") != null) {
+                r = request.getMetadata().get("activeRole").toString().toLowerCase();
+            }
+            if ("hospital".equals(r) || "facility".equals(r)) {
+                return List.of("Post an Urgent ICU Shift", "Search Duty Doctors", "Top up Escrow Wallet", "Review Shortlisted Applicants");
+            } else if ("admin".equals(r)) {
+                return List.of("Review Candidate KYC", "Audit Hospital Verification", "Check Job Approvals", "Open Support Tickets");
+            } else if ("student".equals(r)) {
+                return List.of("Find Internship Shifts", "Council Exam Prep", "Connect with Clinical Mentors", "Verify My Student ID");
+            } else {
+                return List.of("Set me Open to Work", "Find Night ICU Shifts", "How Escrow Payouts Work", "Handover to Support Desk");
+            }
+        }
+
+        return switch (task) {
             case "resume_parse" -> List.of("Review Extracted Skills", "Verify Experience", "Update Profile");
             case "whatsapp_post_shift" -> List.of("Confirm Shift Details", "Publish Shift", "Adjust Pay Rate");
             case "interview_practice" -> List.of("Next Question", "Review Feedback", "Change Specialty");

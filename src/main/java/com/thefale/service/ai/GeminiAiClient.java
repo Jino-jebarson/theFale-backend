@@ -34,11 +34,48 @@ public class GeminiAiClient implements AiProviderClient {
             @Value("${fale.ai.gemini.api-key:${GEMINI_API_KEY:${AI_API_KEY:}}}") String apiKey,
             ObjectMapper objectMapper
     ) {
-        this.apiKey = apiKey != null ? apiKey.trim() : "";
+        String key = apiKey != null ? apiKey.trim() : "";
+        if (key.isBlank() || key.equalsIgnoreCase("placeholder")) {
+            key = resolveKeyFromDotEnv();
+        }
+        this.apiKey = key;
         this.objectMapper = objectMapper;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(20))
                 .build();
+        if (isConfigured()) {
+            log.info("Gemini AI Client successfully configured with live API key.");
+        } else {
+            log.warn("Gemini AI Client has no API key configured. Fallback engine will be active.");
+        }
+    }
+
+    private static String resolveKeyFromDotEnv() {
+        try {
+            java.nio.file.Path[] searchPaths = new java.nio.file.Path[] {
+                java.nio.file.Paths.get(".env"),
+                java.nio.file.Paths.get("../.env"),
+                java.nio.file.Paths.get("f:/theFaleOne-Backend/.env")
+            };
+            for (java.nio.file.Path p : searchPaths) {
+                if (java.nio.file.Files.exists(p)) {
+                    List<String> lines = java.nio.file.Files.readAllLines(p);
+                    for (String line : lines) {
+                        String trimmed = line.trim();
+                        if (trimmed.startsWith("GEMINI_API_KEY=")) {
+                            String val = trimmed.substring("GEMINI_API_KEY=".length()).trim();
+                            if (!val.isBlank()) return val;
+                        } else if (trimmed.startsWith("AI_API_KEY=")) {
+                            String val = trimmed.substring("AI_API_KEY=".length()).trim();
+                            if (!val.isBlank()) return val;
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.debug("Could not resolve Gemini API key from .env: {}", e.getMessage());
+        }
+        return "";
     }
 
     @Override
