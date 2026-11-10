@@ -21,14 +21,16 @@ public class GeminiAiClient implements AiProviderClient {
 
     private static final Logger log = LoggerFactory.getLogger(GeminiAiClient.class);
     private static final List<String> CANDIDATE_MODELS = List.of(
-            "gemini-3.1-flash-lite",
-            "gemini-3.8-flash"
+            "gemini-2.5-flash",
+            "gemini-2.0-flash",
+            "gemini-1.5-flash",
+            "gemini-3.1-flash-lite"
     );
 
     private final String apiKey;
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
-    private volatile String activeModel = "gemini-3.1-flash-lite";
+    private volatile String activeModel = "gemini-2.5-flash";
 
     public GeminiAiClient(
             @Value("${fale.ai.gemini.api-key:${GEMINI_API_KEY:${AI_API_KEY:}}}") String apiKey,
@@ -110,7 +112,20 @@ public class GeminiAiClient implements AiProviderClient {
 
         String jsonPayload = objectMapper.writeValueAsString(requestBody);
 
-        return callModel(activeModel, jsonPayload);
+        Exception lastException = null;
+        for (String model : CANDIDATE_MODELS) {
+            try {
+                String result = callModel(model, jsonPayload);
+                if (result != null && !result.isBlank()) {
+                    this.activeModel = model;
+                    return result;
+                }
+            } catch (Exception ex) {
+                lastException = ex;
+                log.warn("Gemini model {} failed (e.g. 503 spike), trying next candidate: {}", model, ex.getMessage());
+            }
+        }
+        throw lastException != null ? lastException : new RuntimeException("All Gemini candidate models failed.");
     }
 
     private String callModel(String model, String jsonPayload) throws Exception {

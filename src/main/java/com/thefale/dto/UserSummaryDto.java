@@ -16,6 +16,7 @@ public class UserSummaryDto {
     private UUID id;
     private String phone;
     private String email;
+    private String username;
     private String role;
     private String candidateLevel;
     @JsonProperty("onboarded")

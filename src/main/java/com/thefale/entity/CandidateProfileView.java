@@ -7,6 +7,7 @@ import org.hibernate.annotations.CreationTimestamp;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
+
 @Entity
 @Table(name = "candidate_profile_views", indexes = {
         @Index(name = "idx_candidate_views_cid_date", columnList = "candidate_id, viewed_at")
@@ -35,4 +36,3 @@ public class CandidateProfileView {
     @Column(name = "viewed_at", nullable = false, updatable = false)
     private OffsetDateTime viewedAt;
 }
-

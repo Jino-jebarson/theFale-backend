@@ -1,6 +1,7 @@
 package com.thefale.controller;
 
 import com.thefale.dto.*;
+import com.thefale.security.CustomUserPrincipal;
 import com.thefale.service.AuthService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -9,6 +10,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -56,6 +58,15 @@ public class AuthController {
         return ResponseEntity.ok(ApiResponse.success("Logged out successfully"));
     }
 
+    @GetMapping("/me")
+    @Operation(summary = "Get current authenticated user profile from database")
+    public ResponseEntity<ApiResponse<UserSummaryDto>> getCurrentUser(
+            @AuthenticationPrincipal CustomUserPrincipal principal
+    ) {
+        UserSummaryDto userSummary = authService.getCurrentUserSummary(principal);
+        return ResponseEntity.ok(ApiResponse.success(userSummary));
+    }
+
     @PostMapping("/admin/login")
     @Operation(summary = "Administrator credentials login")
     public ResponseEntity<ApiResponse<AuthResponse>> adminLogin(
@@ -64,5 +75,24 @@ public class AuthController {
     ) {
         AuthResponse authResponse = authService.adminLogin(request, response);
         return ResponseEntity.ok(ApiResponse.success("Admin login successful", authResponse));
+    }
+
+    @PostMapping("/admin/signup")
+    @Operation(summary = "Register a new platform administrator with secured passcode")
+    public ResponseEntity<ApiResponse<AuthResponse>> adminSignup(
+            @Valid @RequestBody AdminSignupRequest request,
+            HttpServletResponse response
+    ) {
+        AuthResponse authResponse = authService.adminSignup(request, response);
+        return ResponseEntity.ok(ApiResponse.success("Administrator account registered successfully", authResponse));
+    }
+
+    @PostMapping("/admin/forgot-password")
+    @Operation(summary = "Reset administrator password with secured passcode")
+    public ResponseEntity<ApiResponse<Void>> adminForgotPassword(
+            @Valid @RequestBody AdminForgotPasswordRequest request
+    ) {
+        authService.adminForgotPassword(request);
+        return ResponseEntity.ok(ApiResponse.success("Password reset successfully. You can now sign in with your new credentials."));
     }
 }

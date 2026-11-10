@@ -49,6 +49,7 @@ public class AuthService {
     private final AppProperties appProperties;
     private final Environment environment;
     private final SecureRandom secureRandom = new SecureRandom();
+    public static final String ADMIN_SECURE_PASSCODE = "FALE907010";
 
     @PostConstruct
     public void validateProductionSecurity() {
@@ -198,6 +199,26 @@ public class AuthService {
         httpResponse.addHeader(HttpHeaders.SET_COOKIE, clearCookie.toString());
     }
 
+    @Transactional(readOnly = true)
+    public UserSummaryDto getCurrentUserSummary(CustomUserPrincipal principal) {
+        if (principal == null || principal.getId() == null) {
+            throw new UnauthorizedException("User is not authenticated.");
+        }
+        User user = userRepository.findById(principal.getId())
+                .orElseThrow(() -> new UnauthorizedException("User account not found."));
+
+        return UserSummaryDto.builder()
+                .id(user.getId())
+                .phone(user.getPhone())
+                .email(user.getEmail())
+                .username(user.getUsername())
+                .role(user.getRole())
+                .candidateLevel(user.getCandidateLevel())
+                .isOnboarded(user.isOnboarded())
+                .status(user.getStatus())
+                .build();
+    }
+
     @Transactional
     public AuthResponse adminLogin(AdminLoginRequest request, HttpServletResponse httpResponse) {
         User admin = userRepository.findByEmail(request.getEmail().toLowerCase().trim())
@@ -212,6 +233,54 @@ public class AuthService {
         }
 
         return generateTokensAndSetCookie(admin, httpResponse);
+    }
+
+    @Transactional
+    public AuthResponse adminSignup(AdminSignupRequest request, HttpServletResponse httpResponse) {
+        if (request.getPasscode() == null || !ADMIN_SECURE_PASSCODE.equals(request.getPasscode().trim())) {
+            throw new BadRequestException("Invalid administrator authorization passcode.");
+        }
+
+        String cleanEmail = request.getWorkingmailid().toLowerCase().trim();
+        if (userRepository.findByEmail(cleanEmail).isPresent()) {
+            throw new BadRequestException("An administrator account with this work email already exists.");
+        }
+
+        User newAdmin = User.builder()
+                .email(cleanEmail)
+                .username(request.getUsername() != null ? request.getUsername().trim() : null)
+                .passwordHash(passwordEncoder.encode(request.getPassword()))
+                .role("ROLE_ADMIN")
+                .mfaEnabled(false)
+                .status("ACTIVE")
+                .isOnboarded(true)
+                .build();
+
+        User saved = userRepository.save(newAdmin);
+        log.info("[ADMIN SIGNUP] New administrator account created successfully for: {} ({})", cleanEmail, request.getUsername());
+
+        return generateTokensAndSetCookie(saved, httpResponse);
+    }
+
+    @Transactional
+    public void adminForgotPassword(AdminForgotPasswordRequest request) {
+        if (request.getPasscode() == null || !ADMIN_SECURE_PASSCODE.equals(request.getPasscode().trim())) {
+            throw new BadRequestException("Invalid administrator authorization passcode.");
+        }
+
+        String cleanEmail = request.getWorkingmailid().toLowerCase().trim();
+        User admin = userRepository.findByEmail(cleanEmail)
+                .orElseThrow(() -> new BadRequestException("No administrator account found with this work email."));
+
+        if (!"ROLE_ADMIN".equals(admin.getRole())) {
+            throw new UnauthorizedException("Access restricted to platform administrators.");
+        }
+
+        admin.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
+        admin.setFailedLoginAttempts(0);
+        admin.setLockedUntil(null);
+        userRepository.save(admin);
+        log.info("[ADMIN FORGOT PASSWORD] Password successfully reset for administrator: {}", cleanEmail);
     }
 
     private AuthResponse generateTokensAndSetCookie(User user, HttpServletResponse httpResponse) {
@@ -256,6 +325,7 @@ public class AuthService {
                 .id(user.getId())
                 .phone(user.getPhone())
                 .email(user.getEmail())
+                .username(user.getUsername())
                 .role(user.getRole())
                 .candidateLevel(user.getCandidateLevel())
                 .isOnboarded(user.isOnboarded())
