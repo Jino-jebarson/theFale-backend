@@ -37,6 +37,11 @@ public class ShiftClaimDto {
     private int matchScore;
     private String candidateName;
     private String candidateRole;
+    private String candidateSpecialty;
     private String candidateCity;
+    private String candidateQualification;
+    private String candidateExperience;
+    private boolean councilVerified;
+    private String facilityCity;
     private String rejectionReason;
 }

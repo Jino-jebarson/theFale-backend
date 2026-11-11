@@ -136,7 +136,12 @@ public class ShiftClaimService {
         FacilityProfile facility = facilityProfileRepository.findById(shift.getFacilityId()).orElse(null);
         String hospitalName = facility != null ? facility.getHospitalName() : "Hospital";
 
-        int matchScore = calculateShiftMatchScore(candidate, shift);
+        int matchScore = ClinicalMatchingEngine.calculateShiftMatch(
+                candidate,
+                "STUDENT".equalsIgnoreCase(principal.getCandidateLevel()),
+                shift,
+                facility
+        );
 
         Notification notif = Notification.builder()
                 .userId(principal.getId())
@@ -422,11 +427,13 @@ public class ShiftClaimService {
     }
 
     private ShiftClaimDto mapClaimToDto(ShiftClaim c, LocumShift s, FacilityProfile f) {
+        CandidateProfile cand = candidateProfileRepository.findById(c.getCandidateId()).orElse(null);
         return ShiftClaimDto.builder()
                 .id(c.getId())
                 .shiftId(c.getShiftId())
                 .shiftTitle(s != null ? s.getTitle() : "Locum Duty")
                 .facilityName(f != null ? f.getHospitalName() : "Hospital")
+                .facilityCity(f != null ? f.getCity() : null)
                 .department(s != null ? s.getDepartment() : "Department")
                 .startAt(s != null ? s.getStartAt() : null)
                 .endAt(s != null ? s.getEndAt() : null)
@@ -443,57 +450,18 @@ public class ShiftClaimService {
                 .claimedAt(c.getClaimedAt())
                 .checkedInAt(c.getCheckedInAt())
                 .completedAt(c.getCompletedAt())
-                .candidateName(candidateProfileRepository.findById(c.getCandidateId()).map(CandidateProfile::getName).orElse("Doctor"))
-                .candidateRole(candidateProfileRepository.findById(c.getCandidateId()).map(CandidateProfile::getProfession).orElse("Healthcare Professional"))
-                .candidateCity(candidateProfileRepository.findById(c.getCandidateId()).map(CandidateProfile::getCity).orElse("Bengaluru"))
-                .matchScore(candidateProfileRepository.findById(c.getCandidateId()).map(cand -> calculateShiftMatchScore(cand, s)).orElse(85))
+                .candidateName(cand != null ? cand.getName() : "Doctor")
+                .candidateRole(cand != null ? cand.getProfession() : "Healthcare Professional")
+                .candidateSpecialty(cand != null ? cand.getSpecialty() : null)
+                .candidateCity(cand != null ? cand.getCity() : null)
+                .candidateQualification(cand != null ? cand.getQualification() : null)
+                .candidateExperience(cand != null ? cand.getExperienceYears() : null)
+                .councilVerified(cand != null && "VERIFIED".equalsIgnoreCase(cand.getKycStatus()))
+                .matchScore(cand != null && s != null ? ClinicalMatchingEngine.calculateShiftMatch(cand, false, s, f) : 50)
                 .build();
     }
 
     public static int calculateShiftMatchScore(CandidateProfile candidate, LocumShift shift) {
-        if (candidate == null || shift == null) {
-            return 75;
-        }
-
-        int score = 30; // Baseline floor
-
-        // 1. Role / Department Match (25 pts)
-        String candRole = candidate.getProfession() != null ? candidate.getProfession().toLowerCase() : "";
-        String candSpec = candidate.getSpecialty() != null ? candidate.getSpecialty().toLowerCase() : "";
-        String shiftTitle = shift.getTitle() != null ? shift.getTitle().toLowerCase() : "";
-        String shiftDept = shift.getDepartment() != null ? shift.getDepartment().toLowerCase() : "";
-
-        if ((!candSpec.isBlank() && (shiftTitle.contains(candSpec) || shiftDept.contains(candSpec))) ||
-            (!candRole.isBlank() && (shiftTitle.contains(candRole) || shiftDept.contains(candRole)))) {
-            score += 25;
-        } else if (!candRole.isBlank() && !shiftTitle.isBlank() && (
-                   (candRole.contains("nurse") && shiftTitle.contains("nurse")) ||
-                   (candRole.contains("doctor") && shiftTitle.contains("doctor")) ||
-                   (candRole.contains("physio") && shiftTitle.contains("physio")) ||
-                   (candRole.contains("technician") && shiftTitle.contains("technician")))) {
-            score += 20;
-        } else {
-            score += 10;
-        }
-
-        // 2. Verified Status (25 pts)
-        if ("VERIFIED".equalsIgnoreCase(candidate.getKycStatus())) {
-            score += 25;
-        } else if (candidate.getRegNumber() != null && !candidate.getRegNumber().isBlank()) {
-            score += 15;
-        }
-
-        // 3. Location / City Match (10 pts)
-        FacilityProfile facility = null;
-        if (candidate.getCity() != null) {
-            score += 10;
-        }
-
-        // 4. Experience match (10 pts)
-        if (candidate.getExperienceYears() != null && !candidate.getExperienceYears().isBlank()) {
-            score += 10;
-        }
-
-        return Math.min(100, Math.max(30, score));
+        return ClinicalMatchingEngine.calculateShiftMatch(candidate, false, shift, null);
     }
 }

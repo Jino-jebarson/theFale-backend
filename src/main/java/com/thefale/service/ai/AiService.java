@@ -4,16 +4,24 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thefale.dto.AiRequestDto;
 import com.thefale.dto.AiResponseDto;
+import com.thefale.exception.AiServiceUnavailableException;
+import com.thefale.security.CustomUserPrincipal;
+import com.thefale.security.SecurityUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
+import java.util.function.Consumer;
 
 @Service
 public class AiService {
@@ -22,20 +30,41 @@ public class AiService {
 
     private final GeminiAiClient geminiAiClient;
     private final ClaudeAiClient claudeAiClient;
-    private final FaleClinicalAiEngine fallbackEngine;
     private final String activeProvider;
+    private final AiChatContextService chatContextService;
+    private final AllyChatHistoryService chatHistoryService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public AiService(
             GeminiAiClient geminiAiClient,
             ClaudeAiClient claudeAiClient,
-            FaleClinicalAiEngine fallbackEngine,
             @Value("${fale.ai.provider:${AI_PROVIDER:gemini}}") String activeProvider
+    ) {
+        this(geminiAiClient, claudeAiClient, activeProvider, null, null);
+    }
+
+    public AiService(
+            GeminiAiClient geminiAiClient,
+            ClaudeAiClient claudeAiClient,
+            @Value("${fale.ai.provider:${AI_PROVIDER:gemini}}") String activeProvider,
+            AiChatContextService chatContextService
+    ) {
+        this(geminiAiClient, claudeAiClient, activeProvider, chatContextService, null);
+    }
+
+    @Autowired
+    public AiService(
+            GeminiAiClient geminiAiClient,
+            ClaudeAiClient claudeAiClient,
+            @Value("${fale.ai.provider:${AI_PROVIDER:gemini}}") String activeProvider,
+            AiChatContextService chatContextService,
+            AllyChatHistoryService chatHistoryService
     ) {
         this.geminiAiClient = geminiAiClient;
         this.claudeAiClient = claudeAiClient;
-        this.fallbackEngine = fallbackEngine;
         this.activeProvider = activeProvider != null ? activeProvider.trim().toLowerCase() : "gemini";
+        this.chatContextService = chatContextService;
+        this.chatHistoryService = chatHistoryService;
     }
 
     public AiResponseDto executeTask(AiRequestDto request) {
@@ -43,72 +72,217 @@ public class AiService {
             request = new AiRequestDto();
         }
 
-        AiProviderClient client = "claude".equalsIgnoreCase(activeProvider) ? claudeAiClient : geminiAiClient;
+        List<AiProviderClient> clients = getOrderedConfiguredClients();
+        if (clients.isEmpty()) {
+            throw new AiServiceUnavailableException(
+                    "Live Ally AI is unavailable: no provider API key is configured."
+            );
+        }
 
-        // If client is configured with a valid API key, call the live LLM
-        if (client.isConfigured()) {
+        String effectiveRole = resolveEffectiveRole(request);
+        String systemPrompt = buildSystemPrompt(request, effectiveRole);
+        String userPrompt = buildUserPrompt(request, effectiveRole);
+        Exception lastException = null;
+
+        for (AiProviderClient client : clients) {
             try {
-                String systemPrompt = buildSystemPrompt(request);
-                String userPrompt = buildUserPrompt(request);
-
                 String llmOutput = client.generateContent(systemPrompt, userPrompt);
-
-                if (llmOutput != null && !llmOutput.isBlank()) {
-                    String cleanOutput = llmOutput.trim();
-                    Map<String, Object> structuredMap = null;
-                    // Strip markdown json wrappers if present for json tasks
-                    if (isJsonTask(request.getTask())) {
-                        cleanOutput = cleanJsonOutput(cleanOutput);
-                        try {
-                            structuredMap = objectMapper.readValue(cleanOutput, new TypeReference<Map<String, Object>>() {});
-                        } catch (Exception ex) {
-                            log.debug("Could not deserialize JSON output to Map: {}", ex.getMessage());
-                        }
-                    }
-
-                    return AiResponseDto.builder()
-                            .success(true)
-                            .task(request.getTask())
-                            .provider(client.getProviderName())
-                            .response(cleanOutput)
-                            .structuredData(structuredMap)
-                            .action(inferAction(request.getTask(), cleanOutput))
-                            .suggestions(buildSuggestions(request))
-                            .build();
+                if (llmOutput == null || llmOutput.isBlank()) {
+                    continue;
                 }
+
+                String cleanOutput = llmOutput.trim();
+                Map<String, Object> structuredMap = null;
+
+                if (isJsonTask(request.getTask())) {
+                    String jsonSegment = extractJsonObject(cleanOutput);
+                    if (jsonSegment != null) {
+                        try {
+                            structuredMap = objectMapper.readValue(jsonSegment, new TypeReference<Map<String, Object>>() {});
+                            cleanOutput = jsonSegment;
+                        } catch (Exception ex) {
+                            log.debug("Could not deserialize JSON output for task {}: {}", request.getTask(), ex.getMessage());
+                        }
+                    } else {
+                        cleanOutput = stripMarkdownNoise(cleanOutput);
+                    }
+                } else {
+                    cleanOutput = stripMarkdownNoise(cleanOutput);
+                }
+
+                String readableResponse = extractReadableResponse(request.getTask(), structuredMap, cleanOutput);
+                String action = resolveAction(request.getTask(), effectiveRole, structuredMap, readableResponse);
+                Map<String, Object> actionData = buildActionData(action, structuredMap);
+                List<String> suggestions = resolveSuggestions(request, effectiveRole, structuredMap);
+
+                AiResponseDto responseDto = AiResponseDto.builder()
+                        .success(true)
+                        .task(request.getTask())
+                        .provider(client.getProviderName())
+                        .response(readableResponse)
+                        .structuredData(structuredMap)
+                        .action(action)
+                        .actionData(actionData)
+                        .suggestions(suggestions)
+                        .build();
+
+                persistChatTurnIfNeeded(resolveCurrentUserId(), effectiveRole, request, responseDto);
+                return responseDto;
             } catch (Exception e) {
-                log.warn("Live AI provider ({}) call failed: {}. Falling back to FALE Clinical Engine.", client.getProviderName(), e.getMessage());
+                lastException = e;
+                log.warn("Live AI provider ({}) call failed for task '{}': {}",
+                        client.getProviderName(), request.getTask(), e.getMessage());
             }
         }
 
-        // Seamless fallback to FALE Clinical Engine
-        return fallbackEngine.executeFallback(request);
+        throw new AiServiceUnavailableException(
+                "Live Ally AI service is temporarily unavailable. Please retry in a moment.",
+                lastException
+        );
+    }
+
+    public List<String> getConfiguredProviders() {
+        List<String> list = new ArrayList<>();
+        for (AiProviderClient c : getOrderedConfiguredClients()) {
+            list.add(c.getProviderName());
+        }
+        return list;
+    }
+
+    private List<AiProviderClient> getOrderedConfiguredClients() {
+        AiProviderClient primary = "claude".equalsIgnoreCase(activeProvider) ? claudeAiClient : geminiAiClient;
+        AiProviderClient secondary = primary == claudeAiClient ? geminiAiClient : claudeAiClient;
+        List<AiProviderClient> ordered = new ArrayList<>(2);
+        if (primary.isConfigured()) ordered.add(primary);
+        if (secondary.isConfigured()) ordered.add(secondary);
+        return ordered;
     }
 
     private boolean isJsonTask(String task) {
-        return "resume_parse".equalsIgnoreCase(task)
-                || "kyc_precheck".equalsIgnoreCase(task)
-                || "whatsapp_post_shift".equalsIgnoreCase(task)
-                || "shift_pay_suggest".equalsIgnoreCase(task)
-                || "shift_pay_suggestion".equalsIgnoreCase(task);
+        if (task == null) return false;
+        String t = task.trim().toLowerCase();
+        return switch (t) {
+            case "chat",
+                 "ally_chat",
+                 "resume_parse",
+                 "whatsapp_post_shift",
+                 "shift_pay_suggest",
+                 "shift_pay_suggestion",
+                 "kyc_precheck",
+                 "doc_verify",
+                 "facility_audit",
+                 "application_screen",
+                 "posting_compliance",
+                 "huddle_moderate",
+                 "ally_handoff" -> true;
+            default -> false;
+        };
     }
 
-    private String cleanJsonOutput(String raw) {
-        String s = raw.trim();
-        if (s.startsWith("```json")) {
-            s = s.substring(7);
-        } else if (s.startsWith("```")) {
-            s = s.substring(3);
+    private String extractJsonObject(String raw) {
+        if (raw == null || raw.isBlank()) return null;
+        String s = raw.trim()
+                .replaceAll("(?is)^```json\\s*", "")
+                .replaceAll("(?is)^```\\s*", "")
+                .replaceAll("(?is)\\s*```$", "")
+                .trim();
+        int firstBrace = s.indexOf('{');
+        int lastBrace = s.lastIndexOf('}');
+        if (firstBrace >= 0 && lastBrace > firstBrace) {
+            return s.substring(firstBrace, lastBrace + 1).trim();
         }
-        if (s.endsWith("```")) {
-            s = s.substring(0, s.length() - 3);
-        }
-        return s.trim();
+        return null;
     }
 
-    private String buildUserPrompt(AiRequestDto request) {
+    private String stripMarkdownNoise(String raw) {
+        if (raw == null) return "";
+        return raw.replace("**", "").replace("__", "").trim();
+    }
+
+    private String extractReadableResponse(String task, Map<String, Object> structured, String fallbackRaw) {
+        if (structured == null || structured.isEmpty() || task == null) {
+            return fallbackRaw;
+        }
+        String t = task.trim().toLowerCase();
+        return switch (t) {
+            case "chat", "ally_chat" -> firstNonBlank(structured, fallbackRaw, "reply", "response", "message", "answer");
+            case "ally_handoff" -> firstNonBlank(structured, fallbackRaw, "whatsappDraft", "draft", "reply");
+            case "huddle_moderate" -> firstNonBlank(structured, fallbackRaw, "rationale", "assessment", "summary");
+            case "shift_pay_suggest", "shift_pay_suggestion" -> firstNonBlank(structured, fallbackRaw, "explanation");
+            case "kyc_precheck", "doc_verify", "facility_audit", "application_screen", "posting_compliance" ->
+                    firstNonBlank(structured, fallbackRaw, "assessment", "verdict", "summary", "reasoning");
+            default -> fallbackRaw;
+        };
+    }
+
+    private String firstNonBlank(Map<String, Object> map, String defaultVal, String... keys) {
+        for (String key : keys) {
+            Object val = map.get(key);
+            if (val != null) {
+                String str = stripMarkdownNoise(val.toString());
+                if (!str.isBlank()) {
+                    return str;
+                }
+            }
+        }
+        return defaultVal;
+    }
+
+    private String resolveEffectiveRole(AiRequestDto request) {
+        if (chatContextService != null) {
+            return chatContextService.resolveEffectiveRole(request);
+        }
+        String rawRole = request != null ? request.getRole() : null;
+        if (rawRole == null && request != null && request.getMetadata() != null) {
+            Object r = request.getMetadata().get("activeRole");
+            if (r == null) r = request.getMetadata().get("role");
+            if (r != null) rawRole = r.toString();
+        }
+        String normalizedRole = rawRole != null ? rawRole.trim().toLowerCase() : "clinician";
+        if ("facility".equals(normalizedRole)) normalizedRole = "hospital";
+        if ("professional".equals(normalizedRole)) normalizedRole = "clinician";
+        return normalizedRole;
+    }
+
+    private String buildUserPrompt(AiRequestDto request, String effectiveRole) {
         String prompt = request.getPrompt() != null ? request.getPrompt().trim() : "";
         String task = request.getTask() != null ? request.getTask().trim().toLowerCase() : "";
+
+        if ("chat".equals(task) || "ally_chat".equals(task)) {
+            StringBuilder sb = new StringBuilder();
+            if (chatContextService != null) {
+                String liveContext = chatContextService.buildLiveRoleContext(effectiveRole, prompt);
+                if (liveContext != null && !liveContext.isBlank()) {
+                    sb.append(liveContext).append("\n\n");
+                }
+            }
+            if (request.getMetadata() != null && !request.getMetadata().isEmpty()) {
+                Object userName = request.getMetadata().get("userName");
+                if (userName != null && !userName.toString().isBlank()) {
+                    sb.append("Active User Display Name: ").append(userName).append("\n");
+                }
+            }
+            List<Map<String, String>> turns = resolveHistoryTurns(resolveCurrentUserId(), effectiveRole, request);
+            if (turns != null && !turns.isEmpty()) {
+                int total = turns.size();
+                int start = Math.max(0, total - 10);
+                sb.append("\nRECENT CONVERSATION HISTORY:\n");
+                for (int i = start; i < total; i++) {
+                    Map<String, String> turn = turns.get(i);
+                    if (turn == null) continue;
+                    String sender = turn.getOrDefault("role", "user");
+                    String msgText = turn.getOrDefault("text", "");
+                    if (!msgText.isBlank()) {
+                        sb.append("assistant".equalsIgnoreCase(sender) || "ally".equalsIgnoreCase(sender) ? "Ally: " : "User: ")
+                                .append(msgText.trim())
+                                .append("\n");
+                    }
+                }
+                sb.append("\n");
+            }
+            sb.append("Current User Message: ").append(prompt.isEmpty() ? "Hello Ally" : prompt);
+            return sb.toString();
+        }
 
         if ("bio_writer".equals(task) || "profile_summary".equals(task)) {
             if (!prompt.isEmpty()) {
@@ -176,9 +350,9 @@ public class AiService {
         return prompt.isEmpty() ? "Please assist with clinical operation." : prompt;
     }
 
-    private String buildSystemPrompt(AiRequestDto request) {
+    private String buildSystemPrompt(AiRequestDto request, String effectiveRole) {
         String task = request.getTask() != null ? request.getTask().trim().toLowerCase() : "ally_chat";
-        String lang = request.getLanguage() != null ? request.getLanguage() : "English";
+        String lang = resolveLanguageDisplayName(request.getLanguage());
 
         // Dynamic Real-Time Temporal Context (IST / India)
         ZonedDateTime now = ZonedDateTime.now(ZoneId.of("Asia/Kolkata"));
@@ -191,16 +365,7 @@ public class AiService {
                 "CRITICAL TEMPORAL REALISM: You possess real-time temporal awareness. Whenever answering questions about 'today', 'tomorrow', 'yesterday', days of the week, shifts, or dates, you MUST calculate them accurately relative to this live date (" +
                 todayFormatted + "). Tomorrow is strictly " + tomorrowFormatted + ". Never hallucinate past training cutoff dates (such as 2023 or 2024) or state that you lack real-time information.\n\n";
 
-        // Determine active user role persona dynamically
-        String rawRole = request.getRole();
-        if (rawRole == null && request.getMetadata() != null) {
-            Object r = request.getMetadata().get("activeRole");
-            if (r == null) r = request.getMetadata().get("role");
-            if (r != null) rawRole = r.toString();
-        }
-        String normalizedRole = rawRole != null ? rawRole.trim().toLowerCase() : "clinician";
-        if ("facility".equals(normalizedRole)) normalizedRole = "hospital";
-        if ("professional".equals(normalizedRole)) normalizedRole = "clinician";
+        String normalizedRole = effectiveRole != null ? effectiveRole : "clinician";
 
         return switch (task) {
             case "resume_parse" ->
@@ -307,124 +472,492 @@ public class AiService {
                     "Return a concise operational risk evaluation (Low Risk, Moderate Risk, or High Risk) followed by exactly 1 actionable operational recommendation for the nursing superintendent. Strictly zero emojis.";
 
             case "analytics_insight" ->
-                    "You are an executive healthcare workforce analyst. Generate a concise 3-paragraph executive summary: 1) Staffing Efficiency & Fill Rates, 2) Critical Department Shortages, 3) Cost Optimization via FALE Escrow locum direct deployment. Professional tone, zero emojis.";
+                    temporalHeader + "You are an executive healthcare workforce analyst for FALE Healthcare. " +
+                    "Analyze ONLY the real platform metrics provided in the prompt/metadata. Never invent fake numbers, hospitals, or fill-time claims. " +
+                    "Generate 3 concise paragraphs: 1) Staffing & Fill Performance, 2) Specialty Bottlenecks, 3) Escrow Deployment Optimization. Strictly zero emojis and zero markdown asterisks (**).";
 
             case "application_screen" ->
-                    "You are an executive clinical recruitment auditor for the FALE Healthcare platform. " +
-                    "Analyze the candidate's clinical background against the hospital requisition. " +
-                    "Output a crisp 3-sentence compliance screening verdict: " +
-                    "Sentence 1: Evaluate candidate qualification, specialty background, and practical fit for the specific department role. " +
-                    "Sentence 2: Confirm council verification status, credential compliance, and regulatory standing. " +
-                    "Sentence 3: Provide a clear admin recommendation (e.g. Recommended for immediate shortlist and hospital dispatch). " +
-                    "Keep it professional, clinical, objective, and strictly zero emojis.";
+                    "You are Ally, the clinical recruitment auditor for FALE Healthcare in India. " +
+                    "Audit the candidate's profile, match score, council verification standing, and experience against the applied position. " +
+                    "Return ONLY raw valid JSON (no markdown fences, zero emojis) with these exact keys: " +
+                    "\"status\" (\"RECOMMENDED\" or \"FURTHER_REVIEW\"), " +
+                    "\"isRecommended\" (boolean), " +
+                    "\"suitabilityScore\" (integer 0-100), " +
+                    "\"unitFitAssessment\" (1 crisp sentence on clinical role & specialty alignment), " +
+                    "\"councilAssessment\" (1 crisp sentence on council registration standing), " +
+                    "\"recommendation\" (1 actionable shortlist/review instruction for Admin), " +
+                    "\"assessment\" (combined 2-3 sentence executive summary).";
 
             case "posting_compliance" ->
-                    "You are a healthcare regulatory and clinical labor compliance auditor for Indian hospitals (CEA, Minimum Wages Act, NMC/INC norms). " +
-                    "Audit the provided job or locum shift requirement parameters covering: " +
-                    "1) Statutory wage floor compliance for this specialty and locality, " +
-                    "2) Continuous duty hours cap (max 12h) and patient safety rest cycles, " +
-                    "3) Mandatory statutory council registration criteria (NMC, State Nursing Council) and non-predatory duty terms. " +
-                    "Output a crisp 3-sentence compliance screening verdict: " +
-                    "Sentence 1: Evaluate remuneration package against prevailing state clinical wage floors. " +
-                    "Sentence 2: Confirm duty hours safety and shift rest compliance (maximum 12h continuous duty cap). " +
-                    "Sentence 3: Provide a clear approval recommendation (Compliant - Approved for broadcast, or Flagged for review). " +
-                    "Keep it professional, clinical, objective, and strictly zero emojis.";
+                    "You are Ally, a healthcare statutory and labor compliance auditor for Indian hospitals (Clinical Establishments Act, Minimum Wages Act, NMC/INC norms). " +
+                    "Audit the job or locum shift posting details provided in the prompt/metadata (compensation, duty hours, city, qualification, description). " +
+                    "Flag duty hours exceeding 12h continuous cap or clearly non-compliant pay. " +
+                    "Return ONLY raw valid JSON (no markdown fences, zero emojis) with these exact keys: " +
+                    "\"status\" (\"COMPLIANT\" or \"FLAGGED\"), " +
+                    "\"isCompliant\" (boolean), " +
+                    "\"wageAssessment\" (1 crisp sentence evaluating remuneration against state clinical norms), " +
+                    "\"hoursAssessment\" (1 crisp sentence evaluating continuous duty hours & rest compliance), " +
+                    "\"recommendation\" (1 actionable publish/adjust instruction for Admin), " +
+                    "\"assessment\" (combined 2-3 sentence compliance verdict).";
 
             case "facility_audit" ->
-                    "You are an AI statutory hospital accreditation auditor for the Clinical Establishments Act (CEA), NABH (National Accreditation Board for Hospitals & Healthcare Providers), and state health directorates in India. " +
-                    "Analyze the provided hospital name, license number, accreditation level, GSTIN, bed capacity, and city/state. " +
-                    "Provide a clean, concise 3-sentence compliance assessment: " +
-                    "Sentence 1: State whether the Clinical Establishment license number adheres to state statutory nomenclature standards. " +
-                    "Sentence 2: Evaluate hospital accreditation tier, GSTIN validity, and inpatient-to-ICU bed capacity balance. " +
-                    "Sentence 3: Provide a clear administrative recommendation (Institutional Grade Verified, or Flagged for Document Re-upload). " +
-                    "Keep it professional, clinical, objective, and strictly zero emojis.";
+                    "You are Ally, a statutory hospital accreditation auditor for Indian Clinical Establishments Act (CEA), NABH, and GSTIN registries. " +
+                    "Audit the hospital name, CEA license number, accreditation tier, GSTIN, inpatient/ICU beds, and location strictly. If license number is missing/pending/too short/dummy, flag it. " +
+                    "Return ONLY raw valid JSON (no markdown fences, zero emojis) with these exact keys: " +
+                    "\"status\" (\"VERIFIED\" or \"FLAGGED\"), " +
+                    "\"isVerified\" (boolean), " +
+                    "\"formatValid\" (boolean), " +
+                    "\"confidence\" (integer 0-100), " +
+                    "\"licenseAssessment\" (1 crisp sentence evaluating CEA license nomenclature & validity), " +
+                    "\"infraAssessment\" (1 crisp sentence evaluating bed/ICU capacity & accreditation balance), " +
+                    "\"recommendation\" (1 actionable verification/re-upload instruction for Admin), " +
+                    "\"assessment\" (combined 2-3 sentence accreditation summary).";
 
             case "kyc_precheck", "doc_verify" ->
-                    "You are an AI statutory credential auditor for Indian healthcare regulatory boards (NMC, KMC, INC, KSNC, TNMC, PCI, DCI, NCAHP). " +
+                    "You are Ally, a statutory credential auditor for Indian healthcare regulatory boards (NMC, KMC, INC, KSNC, TNMC, PCI, DCI, NCAHP). " +
                     "Audit the provided candidate name, council, role, and registration number strictly against official Indian statutory nomenclature. " +
                     "CRITICAL AUDIT RULES: " +
-                    "1. For Indian Nursing Council (INC / NUID): A valid registration MUST have an official state council prefix and year (e.g. KSNC-2019-XXXXX, TNC/RN/XXXX, KNC-XXXX) or a 14-digit national NUID. Plain random digits like '728282' or '123456' lack statutory nomenclature and MUST be marked formatValid=false and status='FLAGGED_DISCREPANCY' with confidence <= 40. " +
-                    "2. For Medical Councils (NMC/KMC/TNMC/MMC): Plain numbers without council prefix or standard alphanumeric format MUST be marked formatValid=false and status='FLAGGED_DISCREPANCY'. " +
-                    "3. Return ONLY a valid JSON object with the following keys: " +
-                    "\"status\": (\"CLEAR\" or \"FLAGGED_DISCREPANCY\"), " +
-                    "\"formatValid\": (boolean), " +
-                    "\"confidence\": (integer percentage 0-100), " +
-                    "\"assessment\": (concise 2-sentence clinical compliance explanation, stating clearly whether the number follows statutory nomenclature or lacks council prefix), " +
-                    "\"recommendation\": (actionable instruction for the clinician or compliance desk). " +
-                    "Do NOT output markdown fences, titles, or conversational text. Return ONLY the raw valid JSON.";
+                    "1. For Indian Nursing Council (INC / NUID): Valid registration requires state council prefix and year (e.g. KSNC-2019-XXXXX, TNC/RN/XXXX) or a 14-digit national NUID. Plain short numbers like '728282' or '123456' lack statutory nomenclature and MUST be marked formatValid=false and status='FLAGGED_DISCREPANCY' with confidence <= 40. " +
+                    "2. For Medical/Allied Councils (NMC/KMC/TNMC/MMC/PCI): Plain numbers without council prefix or valid alphanumeric format MUST be marked formatValid=false and status='FLAGGED_DISCREPANCY'. " +
+                    "Return ONLY raw valid JSON (no markdown fences, no titles, zero emojis) with exact keys: " +
+                    "\"status\" (\"CLEAR\" or \"FLAGGED_DISCREPANCY\"), " +
+                    "\"formatValid\" (boolean), " +
+                    "\"confidence\" (integer 0-100), " +
+                    "\"nameAligned\" (boolean), " +
+                    "\"assessment\" (concise 2-sentence compliance explanation), " +
+                    "\"recommendation\" (actionable instruction for Admin or clinician).";
 
             case "huddle_moderate" ->
-                    "You are a clinical community safety moderator for FALE Huddle. Evaluate the post text for: 1) Protected Health Information (UHID, MRD, patient identities), 2) Commercial recruiter phone number spam (+91/WhatsApp solicitation), 3) Harassment. Return a status (SAFE or FLAGGED) and 1 sentence moderation rationale.";
+                    "You are Ally, the clinical community safety moderator for FALE Huddle. " +
+                    "Evaluate the post content for: 1) Protected Health Information (patient names, UHID, MRD, IPD/OPD/bed identifiers), 2) Commercial recruiter phone/WhatsApp spam (+91, contact solicitations), 3) Harassment or unsafe claims. " +
+                    "Return ONLY raw valid JSON (no markdown fences, zero emojis) with exact keys: " +
+                    "\"status\" (\"SAFE\" or \"FLAGGED\"), " +
+                    "\"isApproved\" (boolean), " +
+                    "\"category\" (concise moderation category label), " +
+                    "\"rationale\" (1-2 clean sentences explaining the safety decision).";
 
             case "ally_handoff" ->
-                    "You are the FALE Operations Support Lead. Summarize the user's inquiry into 2 concise lines and draft a polite, professional WhatsApp response ready to send to the clinician or hospital representative. No emojis.";
+                    "You are Ally, the FALE Clinical Operations Support Lead. Review the support ticket details and craft a polite, factual response draft tailored specifically to the requester's issue (never invent ticket IDs or fake promises). " +
+                    "Return ONLY raw valid JSON (no markdown fences, zero emojis) with exact keys: " +
+                    "\"ticketSummary\" (1 concise triage summary line for Admin), " +
+                    "\"whatsappDraft\" (polite 3-4 sentence response ready to send to the clinician or hospital representative).";
 
             case "daily_brief" ->
-                    "You are the FALE Chief Operations Officer. Write a concise morning operations brief covering: 1) Pending Council Verifications requiring review, 2) Urgent unfilled hospital shifts for today, 3) Priority candidate support queries.";
+                    temporalHeader + "You are Ally, the FALE Operations Lead. " +
+                    "Summarize ONLY the real platform queue metrics provided in the prompt/metadata (pendingKyc, pendingJobs, pendingFacilities, activeShifts, disputes). Strictly do NOT invent fake numbers or unmentioned queues. " +
+                    "Write 3 concise plain-text bullets (using •, zero markdown asterisks **, zero emojis) covering: 1) Pending verifications, 2) Active shift demand & approvals, 3) Escrow & operations status.";
 
             case "demand_forecast" ->
-                    temporalHeader + "You are a predictive clinical workforce analyst in India. Generate a 7-day surge demand forecast across ICU, Emergency, OT, and General Wards, identifying peak weekend locum requirements and staffing recommendations.";
+                    temporalHeader + "You are Ally, a predictive clinical workforce analyst in India. " +
+                    "Based strictly on the real region, specialties, and active shift count provided in the prompt/metadata, write a realistic, grounded 7-day staffing demand outlook and weekend shift recommendation. " +
+                    "Strictly do NOT fabricate fake historical statistics. Plain text, zero markdown asterisks (**), zero emojis.";
 
             case "translate_chat" ->
                     "Translate the provided text into the requested Indian language (" + lang + ") with accurate medical terminology and respectful professional tone.";
 
             default -> {
-                String roleInstructions = switch (normalizedRole) {
-                    case "hospital" ->
-                        "You are Ally, the Hospital Staffing & Escrow Copilot for FALE Healthcare in India. " +
-                        "You are currently assisting a verified Hospital Administrator, HR Director, Medical Superintendent, or Recruiter. " +
-                        "Assist them with posting urgent doctor/nurse locum shifts, sourcing verified duty clinicians with authentic KMC/INC registrations, managing hospital escrow deposits and 24-hour settlements, and reviewing candidate credentials. " +
-                        "Never address the user as a job applicant or clinician. Address hospital staffing and compliance matters with executive precision.";
+                String[] roleMeta = resolveRolePersona(normalizedRole);
+                String roleInstructions = roleMeta[0];
+                String allowedActions = roleMeta[1];
 
-                    case "student" ->
-                        "You are Ally, the dedicated FALE Student & Junior Clinical Copilot for medical, nursing, and paramedical students in India. " +
-                        "Assist students with clinical observerships, junior internship shifts at accredited teaching hospitals, State Council licensure exam prep (KMC, KSNC, NMC), and medical mentorship in Huddle. " +
-                        "Keep answers encouraging, academically rigorous, concise, and helpful.";
+                String safetyBoundary =
+                        "\n\nHUMAN-IN-THE-LOOP & DATA GROUNDING RULES:\n" +
+                        "1. Rely strictly on facts in the LIVE SNAPSHOT / RECENT CONVERSATION HISTORY / metadata when citing numbers, verification status, wallet balances, or live shifts/jobs. Never invent fake jobs, ticket IDs, or queue numbers.\n" +
+                        "2. NEVER claim you have approved or rejected a KYC, hospital, job posting, payout, or submitted a job application directly. Always direct the user via an allowed navigation/review action button so a human confirms on screen (only 'open_to_work' toggles availability directly for clinicians).\n" +
+                        "3. Output ONLY a raw valid JSON object (zero markdown fences, zero emojis, zero '**' asterisks) with exact keys:\n" +
+                        "\"reply\" (concise 2-4 sentence response in " + lang + "),\n" +
+                        "\"action\" (one of [" + allowedActions + "] ONLY when helpful to navigate or execute, otherwise null),\n" +
+                        "\"actionLabel\" (short 2-4 word button CTA in " + lang + " matching the action, or null),\n" +
+                        "\"suggestions\" (array of 2-3 short contextual follow-up prompts in " + lang + ").";
 
-                    case "admin" ->
-                        "You are Ally, the Platform Operations & Compliance Copilot for the FALE internal operations team in India. " +
-                        "Assist administrators with candidate KYC state council verification queues, hospital statutory Clinical Establishments Act (CEA) approvals, shift wage parity compliance, and escrow dispute resolutions. " +
-                        "Keep answers objective, analytical, concise, and protocol-driven.";
-
-                    default ->
-                        "You are Ally, the clinical career AI assistant for FALE (Flexible Allied Locum & Employment Network in India). " +
-                        "You assist verified doctors, nurses, and paramedical professionals with locum shifts, KMC/KSNC council credentials, and guaranteed Escrow payouts. " +
-                        "Be concise, respectful, empathetic, and professional.";
-                };
-                yield temporalHeader + roleInstructions + " Zero emojis. Output language: " + lang + ".";
+                yield temporalHeader + roleInstructions + safetyBoundary;
             }
         };
     }
 
-    private String inferAction(String task, String output) {
-        if ("ally_chat".equalsIgnoreCase(task) || "chat".equalsIgnoreCase(task)) {
-            String lower = output.toLowerCase();
-            if (lower.contains("open to work") || lower.contains("available for shifts")) {
-                return "open_to_work";
-            } else if (lower.contains("browse") || lower.contains("locum shifts")) {
-                return "browse_shifts";
-            } else if (lower.contains("human") || lower.contains("support desk") || lower.contains("escalat")) {
-                return "handover_human";
+    public record PreparedChatRequest(
+            AiRequestDto request,
+            UUID userId,
+            String effectiveRole,
+            String streamingSystemPrompt,
+            String userPrompt
+    ) {}
+
+    public PreparedChatRequest prepareChatStreamContext(AiRequestDto request) {
+        AiRequestDto safeReq = request != null ? request : new AiRequestDto();
+        if (safeReq.getTask() == null || safeReq.getTask().isBlank()) {
+            safeReq.setTask("chat");
+        }
+        UUID userId = resolveCurrentUserId();
+        String effectiveRole = resolveEffectiveRole(safeReq);
+        String lang = resolveLanguageDisplayName(safeReq.getLanguage());
+        ZonedDateTime now = ZonedDateTime.now(ZoneId.of("Asia/Kolkata"));
+        String todayFormatted = now.format(DateTimeFormatter.ofPattern("EEEE, MMMM d, yyyy"));
+        String tomorrowFormatted = now.plusDays(1).format(DateTimeFormatter.ofPattern("EEEE, MMMM d, yyyy"));
+        String timeFormatted = now.format(DateTimeFormatter.ofPattern("h:mm a z"));
+
+        String temporalHeader = "CURRENT LIVE DATE & TIME IN INDIA: Today is " + todayFormatted + " (Current Time: " + timeFormatted + "). " +
+                "Tomorrow is " + tomorrowFormatted + ".\n" +
+                "CRITICAL TEMPORAL REALISM: Calculate relative dates accurately against " + todayFormatted + ".\n\n";
+
+        String[] roleMeta = resolveRolePersona(effectiveRole);
+        String streamingPrompt = temporalHeader + roleMeta[0] +
+                "\n\nHUMAN-IN-THE-LOOP & DATA GROUNDING RULES:\n" +
+                "1. Rely strictly on facts in the LIVE SNAPSHOT / RECENT CONVERSATION HISTORY / metadata. Never invent fake jobs, ticket IDs, or queue numbers.\n" +
+                "2. NEVER claim you approved/rejected KYC, hospitals, job postings, payouts, or applied to jobs directly; guide the user via an allowed action button (only 'open_to_work' toggles availability directly for clinicians).\n" +
+                "3. Write your natural concise response (2-4 sentences) directly in " + lang + " with zero emojis and zero markdown '**' asterisks.\n" +
+                "4. At the VERY END of your response, append a single line strictly in this exact format:\n" +
+                "[FALE_META]{\"action\":<one of [" + roleMeta[1] + "] or null>,\"actionLabel\":<short CTA in " + lang + " or null>,\"suggestions\":[<2-3 short follow-ups in " + lang + ">]}[/FALE_META]";
+
+        String userPrompt = buildUserPrompt(safeReq, effectiveRole);
+        return new PreparedChatRequest(safeReq, userId, effectiveRole, streamingPrompt, userPrompt);
+    }
+
+    public void streamPreparedChat(
+            PreparedChatRequest prepared,
+            Consumer<String> onReplyChunk,
+            Consumer<AiResponseDto> onComplete
+    ) {
+        List<AiProviderClient> clients = getOrderedConfiguredClients();
+        if (clients.isEmpty()) {
+            throw new AiServiceUnavailableException("Live Ally AI is unavailable: no provider API key is configured.");
+        }
+
+        AiRequestDto req = prepared.request();
+        String effectiveRole = prepared.effectiveRole();
+
+        // Stream live chunks when Gemini is primary and configured
+        if (clients.get(0) == geminiAiClient && geminiAiClient.isConfigured()) {
+            try {
+                final String marker = "[FALE_META]";
+                final StringBuilder rawStream = new StringBuilder();
+                final StringBuilder pending = new StringBuilder();
+                final boolean[] inMeta = {false};
+
+                geminiAiClient.streamContent(prepared.streamingSystemPrompt(), prepared.userPrompt(), chunk -> {
+                    if (chunk == null || chunk.isEmpty()) return;
+                    rawStream.append(chunk);
+                    if (inMeta[0]) return;
+
+                    pending.append(chunk);
+                    int markerIdx = pending.indexOf(marker);
+                    if (markerIdx >= 0) {
+                        String before = stripMarkdownNoise(pending.substring(0, markerIdx));
+                        if (!before.isEmpty() && onReplyChunk != null) {
+                            onReplyChunk.accept(before);
+                        }
+                        inMeta[0] = true;
+                        pending.setLength(0);
+                        return;
+                    }
+
+                    // Keep a small tail buffer to avoid emitting a split "[FALE_META]" tag prefix
+                    int safeEmitLen = pending.length() - (marker.length() - 1);
+                    if (safeEmitLen > 0) {
+                        String emit = pending.substring(0, safeEmitLen).replace("**", "").replace("__", "");
+                        if (!emit.isEmpty() && onReplyChunk != null) {
+                            onReplyChunk.accept(emit);
+                        }
+                        pending.delete(0, safeEmitLen);
+                    }
+                });
+
+                if (!inMeta[0] && pending.length() > 0 && onReplyChunk != null) {
+                    String rem = stripMarkdownNoise(pending.toString());
+                    if (!rem.isEmpty()) {
+                        onReplyChunk.accept(rem);
+                    }
+                }
+
+                String full = rawStream.toString();
+                if (!full.isBlank()) {
+                    AiResponseDto finalDto = buildStreamFinalDto(req, effectiveRole, full);
+                    persistChatTurnIfNeeded(prepared.userId(), effectiveRole, req, finalDto);
+                    if (onComplete != null) onComplete.accept(finalDto);
+                    return;
+                }
+            } catch (Exception ex) {
+                log.warn("Gemini streaming failed, falling back to standard live provider execution: {}", ex.getMessage());
             }
+        }
+
+        // Seamless live fallback (Claude or retry via non-streaming live path)
+        AiResponseDto fallbackDto = executeTaskWithPreparedPrompts(req, effectiveRole,
+                buildSystemPrompt(req, effectiveRole), prepared.userPrompt(), clients);
+        persistChatTurnIfNeeded(prepared.userId(), effectiveRole, req, fallbackDto);
+        if (onReplyChunk != null && fallbackDto.getResponse() != null && !fallbackDto.getResponse().isBlank()) {
+            onReplyChunk.accept(fallbackDto.getResponse());
+        }
+        if (onComplete != null) {
+            onComplete.accept(fallbackDto);
+        }
+    }
+
+    private UUID resolveCurrentUserId() {
+        return SecurityUtils.getCurrentPrincipal().map(CustomUserPrincipal::getId).orElse(null);
+    }
+
+    private List<Map<String, String>> resolveHistoryTurns(UUID userId, String effectiveRole, AiRequestDto request) {
+        if (request != null && request.getHistory() != null && !request.getHistory().isEmpty()) {
+            return request.getHistory();
+        }
+        if (chatHistoryService != null && userId != null) {
+            try {
+                return chatHistoryService.getRecentPromptTurns(userId, effectiveRole, 10);
+            } catch (Exception ex) {
+                log.debug("Could not load persisted Ally chat turns: {}", ex.getMessage());
+            }
+        }
+        return Collections.emptyList();
+    }
+
+    private void persistChatTurnIfNeeded(UUID userId, String effectiveRole, AiRequestDto request, AiResponseDto response) {
+        if (chatHistoryService == null || userId == null || request == null || response == null || !response.isSuccess()) {
+            return;
+        }
+        String task = request.getTask() != null ? request.getTask().trim().toLowerCase() : "";
+        if (!"chat".equals(task) && !"ally_chat".equals(task)) {
+            return;
+        }
+        try {
+            chatHistoryService.appendTurn(userId, effectiveRole, request.getPrompt(), response);
+        } catch (Exception ex) {
+            log.warn("Could not persist Ally chat turn to DB: {}", ex.getMessage());
+        }
+    }
+
+    private AiResponseDto executeTaskWithPreparedPrompts(
+            AiRequestDto request,
+            String effectiveRole,
+            String systemPrompt,
+            String userPrompt,
+            List<AiProviderClient> clients
+    ) {
+        Exception lastException = null;
+        for (AiProviderClient client : clients) {
+            try {
+                String llmOutput = client.generateContent(systemPrompt, userPrompt);
+                if (llmOutput == null || llmOutput.isBlank()) continue;
+
+                String cleanOutput = llmOutput.trim();
+                Map<String, Object> structuredMap = null;
+                if (isJsonTask(request.getTask())) {
+                    String jsonSegment = extractJsonObject(cleanOutput);
+                    if (jsonSegment != null) {
+                        try {
+                            structuredMap = objectMapper.readValue(jsonSegment, new TypeReference<Map<String, Object>>() {});
+                            cleanOutput = jsonSegment;
+                        } catch (Exception ignored) {}
+                    } else {
+                        cleanOutput = stripMarkdownNoise(cleanOutput);
+                    }
+                } else {
+                    cleanOutput = stripMarkdownNoise(cleanOutput);
+                }
+
+                String readableResponse = extractReadableResponse(request.getTask(), structuredMap, cleanOutput);
+                String action = resolveAction(request.getTask(), effectiveRole, structuredMap, readableResponse);
+                return AiResponseDto.builder()
+                        .success(true)
+                        .task(request.getTask())
+                        .provider(client.getProviderName())
+                        .response(readableResponse)
+                        .structuredData(structuredMap)
+                        .action(action)
+                        .actionData(buildActionData(action, structuredMap))
+                        .suggestions(resolveSuggestions(request, effectiveRole, structuredMap))
+                        .build();
+            } catch (Exception e) {
+                lastException = e;
+                log.warn("Live AI provider ({}) call failed for stream fallback: {}", client.getProviderName(), e.getMessage());
+            }
+        }
+        throw new AiServiceUnavailableException(
+                "Live Ally AI service is temporarily unavailable. Please retry in a moment.",
+                lastException
+        );
+    }
+
+    private AiResponseDto buildStreamFinalDto(AiRequestDto req, String effectiveRole, String fullRaw) {
+        String markerStart = "[FALE_META]";
+        String markerEnd = "[/FALE_META]";
+        String reply = fullRaw;
+        Map<String, Object> metaMap = null;
+
+        int idx = fullRaw.indexOf(markerStart);
+        if (idx >= 0) {
+            reply = fullRaw.substring(0, idx);
+            int endIdx = fullRaw.indexOf(markerEnd, idx + markerStart.length());
+            String metaJson = endIdx > idx
+                    ? fullRaw.substring(idx + markerStart.length(), endIdx)
+                    : fullRaw.substring(idx + markerStart.length());
+            String extracted = extractJsonObject(metaJson);
+            if (extracted != null) {
+                try {
+                    metaMap = objectMapper.readValue(extracted, new TypeReference<Map<String, Object>>() {});
+                } catch (Exception ex) {
+                    log.debug("Could not parse [FALE_META] JSON: {}", ex.getMessage());
+                }
+            }
+        }
+
+        String cleanReply = stripMarkdownNoise(reply);
+        String action = resolveAction(req.getTask(), effectiveRole, metaMap, cleanReply);
+        return AiResponseDto.builder()
+                .success(true)
+                .task(req.getTask())
+                .provider("gemini")
+                .response(cleanReply)
+                .structuredData(metaMap)
+                .action(action)
+                .actionData(buildActionData(action, metaMap))
+                .suggestions(resolveSuggestions(req, effectiveRole, metaMap))
+                .build();
+    }
+
+    private String[] resolveRolePersona(String normalizedRole) {
+        return switch (normalizedRole) {
+            case "hospital" -> new String[]{
+                    "You are Ally, the Hospital Staffing & Escrow Copilot for FALE Healthcare in India. " +
+                    "You are currently assisting a Hospital Administrator, HR Director, Medical Superintendent, or Recruiter. " +
+                    "Assist them with posting urgent doctor/nurse locum shifts, sourcing verified duty clinicians with authentic KMC/INC registrations, managing hospital escrow deposits and 24-hour settlements, and reviewing candidate credentials. " +
+                    "Never address the user as a job applicant or clinician.",
+                    "\"post_shift\", \"search_candidates\", \"wallet_topup\", \"review_applicants\", \"handover_human\""
+            };
+            case "student" -> new String[]{
+                    "You are Ally, the dedicated FALE Student & Junior Clinical Copilot for medical, nursing, and paramedical students in India. " +
+                    "Assist students with clinical observerships, internship openings at accredited teaching hospitals, State Council exam prep (KMC, KSNC, NMC), and medical mentorship in Huddle. " +
+                    "Remember: students are ineligible for independent locum shifts without graduation credentials.",
+                    "\"find_internships\", \"start_learning\", \"join_huddle\", \"view_profile\", \"handover_human\""
+            };
+            case "admin" -> new String[]{
+                    "You are Ally, the Platform Operations & Compliance Copilot for the FALE internal operations team in India. " +
+                    "Assist administrators with candidate KYC council verification queues, hospital statutory Clinical Establishments Act (CEA) approvals, shift wage parity compliance, shortlisting queues, huddle moderation, and support escalations. " +
+                    "Be objective, analytical, concise, and protocol-driven.",
+                    "\"audit_candidates\", \"verify_hospitals\", \"job_approvals\", \"shortlisting\", \"huddle_moderation\", \"support_tickets\""
+            };
+            default -> new String[]{
+                    "You are Ally, the clinical career copilot for FALE (Flexible Allied Locum & Employment Network in India). " +
+                    "You assist verified doctors, nurses, and paramedical professionals with locum shifts, hospital jobs, KMC/KSNC council credentials, and guaranteed Escrow payouts. " +
+                    "Be concise, respectful, empathetic, and professional.",
+                    "\"open_to_work\", \"browse_shifts\", \"browse_jobs\", \"check_earnings\", \"view_profile\", \"handover_human\""
+            };
+        };
+    }
+
+    private String resolveLanguageDisplayName(String code) {
+        if (code == null || code.isBlank()) return "English";
+        return switch (code.trim().toLowerCase()) {
+            case "kn" -> "Kannada (ಕನ್ನಡ)";
+            case "ml" -> "Malayalam (മലയാളം)";
+            case "hi" -> "Hindi (हिन्दी)";
+            case "ta" -> "Tamil (தமிழ்)";
+            case "en" -> "English";
+            default -> code.trim();
+        };
+    }
+
+    private String resolveAction(String task, String effectiveRole, Map<String, Object> structured, String output) {
+        if ("ally_chat".equalsIgnoreCase(task) || "chat".equalsIgnoreCase(task)) {
+            if (structured != null && structured.get("action") != null) {
+                String sanitized = sanitizeAction(effectiveRole, structured.get("action").toString());
+                if (sanitized != null) {
+                    return sanitized;
+                }
+            }
+            return inferRoleSafeAction(effectiveRole, output);
         }
         return null;
     }
 
-    private List<String> buildSuggestions(AiRequestDto request) {
+    private String sanitizeAction(String role, String rawAction) {
+        if (chatContextService != null) {
+            return chatContextService.sanitizeActionForRole(role, rawAction);
+        }
+        if (rawAction == null || rawAction.isBlank() || "null".equalsIgnoreCase(rawAction.trim())) return null;
+        return rawAction.trim().toLowerCase();
+    }
+
+    private Map<String, Object> buildActionData(String action, Map<String, Object> structured) {
+        if (action == null) return null;
+        String rawLabel = structured != null && structured.get("actionLabel") != null
+                ? structured.get("actionLabel").toString()
+                : null;
+        if (chatContextService != null) {
+            return chatContextService.buildActionData(action, rawLabel);
+        }
+        return rawLabel != null && !rawLabel.isBlank() ? Map.of("label", rawLabel.trim()) : null;
+    }
+
+    private String inferRoleSafeAction(String effectiveRole, String output) {
+        if (output == null) return null;
+        String lower = output.toLowerCase();
+        return switch (effectiveRole) {
+            case "clinician" -> {
+                if (lower.contains("open to work") || lower.contains("available for shifts")) yield "open_to_work";
+                if (lower.contains("locum") || lower.contains("shift")) yield "browse_shifts";
+                if (lower.contains("escrow") || lower.contains("payout") || lower.contains("earning")) yield "check_earnings";
+                if (lower.contains("human") || lower.contains("support") || lower.contains("escalat")) yield "handover_human";
+                yield null;
+            }
+            case "student" -> {
+                if (lower.contains("internship")) yield "find_internships";
+                if (lower.contains("exam") || lower.contains("prep") || lower.contains("course")) yield "start_learning";
+                if (lower.contains("mentor") || lower.contains("huddle")) yield "join_huddle";
+                if (lower.contains("support") || lower.contains("ticket")) yield "handover_human";
+                yield null;
+            }
+            case "hospital" -> {
+                if (lower.contains("post") && lower.contains("shift")) yield "post_shift";
+                if (lower.contains("escrow") || lower.contains("wallet") || lower.contains("top up")) yield "wallet_topup";
+                if (lower.contains("applicant") || lower.contains("shortlist")) yield "review_applicants";
+                if (lower.contains("search") || lower.contains("doctor") || lower.contains("clinician")) yield "search_candidates";
+                if (lower.contains("support") || lower.contains("ticket")) yield "handover_human";
+                yield null;
+            }
+            case "admin" -> {
+                if (lower.contains("hospital") || lower.contains("facility") || lower.contains("cea")) yield "verify_hospitals";
+                if (lower.contains("candidate") || lower.contains("kyc")) yield "audit_candidates";
+                if (lower.contains("job") || lower.contains("approval")) yield "job_approvals";
+                if (lower.contains("shortlist")) yield "shortlisting";
+                if (lower.contains("huddle") || lower.contains("flag")) yield "huddle_moderation";
+                if (lower.contains("ticket") || lower.contains("support")) yield "support_tickets";
+                yield null;
+            }
+            default -> null;
+        };
+    }
+
+    private List<String> resolveSuggestions(AiRequestDto request, String effectiveRole, Map<String, Object> structured) {
+        if (structured != null && structured.get("suggestions") instanceof List<?> rawList) {
+            List<String> dynamic = new ArrayList<>();
+            for (Object item : rawList) {
+                if (item != null) {
+                    String s = stripMarkdownNoise(item.toString());
+                    if (!s.isBlank()) {
+                        dynamic.add(s);
+                        if (dynamic.size() >= 4) break;
+                    }
+                }
+            }
+            if (!dynamic.isEmpty()) {
+                return dynamic;
+            }
+        }
+        return buildSuggestions(request, effectiveRole);
+    }
+
+    private List<String> buildSuggestions(AiRequestDto request, String effectiveRole) {
         String task = request != null && request.getTask() != null ? request.getTask().toLowerCase() : "";
         if ("ally_chat".equals(task) || "chat".equals(task)) {
-            String r = request.getRole() != null ? request.getRole().toLowerCase() : "";
-            if (request.getMetadata() != null && request.getMetadata().get("activeRole") != null) {
-                r = request.getMetadata().get("activeRole").toString().toLowerCase();
-            }
-            if ("hospital".equals(r) || "facility".equals(r)) {
-                return List.of("Post an Urgent ICU Shift", "Search Duty Doctors", "Top up Escrow Wallet", "Review Shortlisted Applicants");
-            } else if ("admin".equals(r)) {
+            if ("hospital".equals(effectiveRole)) {
+                return List.of("Post an Urgent ICU Shift", "Check My Escrow Wallet", "Review Applicants", "Search Duty Clinicians");
+            } else if ("admin".equals(effectiveRole)) {
                 return List.of("Review Candidate KYC", "Audit Hospital Verification", "Check Job Approvals", "Open Support Tickets");
-            } else if ("student".equals(r)) {
-                return List.of("Find Internship Shifts", "Council Exam Prep", "Connect with Clinical Mentors", "Verify My Student ID");
+            } else if ("student".equals(effectiveRole)) {
+                return List.of("Show Open Internships", "Council Exam Prep", "Connect with Clinical Mentors", "Check My Verification Status");
             } else {
-                return List.of("Set me Open to Work", "Find Night ICU Shifts", "How Escrow Payouts Work", "Handover to Support Desk");
+                return List.of("Check My KYC & Profile", "Set me Open to Work", "Show Open Locum Shifts", "Handover to Support Desk");
             }
         }
 
@@ -432,7 +965,7 @@ public class AiService {
             case "resume_parse" -> List.of("Review Extracted Skills", "Verify Experience", "Update Profile");
             case "whatsapp_post_shift" -> List.of("Confirm Shift Details", "Publish Shift", "Adjust Pay Rate");
             case "interview_practice" -> List.of("Next Question", "Review Feedback", "Change Specialty");
-            default -> List.of("Explore matching shifts", "Check Escrow payment", "Contact FALE team");
+            default -> Collections.emptyList();
         };
     }
 

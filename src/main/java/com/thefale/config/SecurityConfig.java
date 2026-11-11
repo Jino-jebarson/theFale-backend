@@ -81,7 +81,7 @@ public class SecurityConfig {
                                 "/api/v1/auth/admin/forgot-password",
                                 "/api/v1/auth/admin/mfa/verify",
                                 "/api/v1/verifications/**",
-                                "/api/v1/ai/**",
+                                "/api/v1/ai/status",
                                 "/swagger-ui/**",
                                 "/swagger-ui.html",
                                 "/v3/api-docs/**",

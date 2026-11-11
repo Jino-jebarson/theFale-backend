@@ -416,6 +416,11 @@ public class AdminService {
                                     .collect(Collectors.toList())
                             : Collections.emptyList();
 
+                    boolean candIsStudent = candidateUser != null && "STUDENT".equalsIgnoreCase(candidateUser.getCandidateLevel());
+                    int canonicalScore = (candidate != null && job != null)
+                            ? ClinicalMatchingEngine.calculateJobMatch(candidate, candIsStudent, job)
+                            : app.getMatchScore();
+
                     return JobApplicationDto.builder()
                             .id(app.getId())
                             .jobId(app.getJobId())
@@ -423,6 +428,7 @@ public class AdminService {
                             .candidateId(app.getCandidateId())
                             .candidateName(candidate != null ? candidate.getName() : "Candidate")
                             .candidateRole(candidate != null ? (candidate.getProfession() != null ? candidate.getProfession() : candidate.getCourse()) : null)
+                            .candidateSpecialty(candidate != null ? candidate.getSpecialty() : null)
                             .candidateCity(candidate != null ? candidate.getCity() : null)
                             .candidateState(candidate != null ? candidate.getState() : null)
                             .candidateQualification(candidate != null ? candidate.getQualification() : null)
@@ -441,7 +447,7 @@ public class AdminService {
                             .department(job != null ? job.getDepartment() : "Clinical")
                             .city(job != null ? job.getCity() : "Location")
                             .status(app.getStatus())
-                            .matchScore(app.getMatchScore())
+                            .matchScore(canonicalScore)
                             .appliedAt(app.getAppliedAt())
                             .interviewScheduledAt(app.getInterviewScheduledAt())
                             .interviewLocationOrLink(app.getInterviewLocationOrLink())
@@ -920,14 +926,27 @@ public class AdminService {
                     LocumShift shift = locumShiftRepository.findById(c.getShiftId()).orElse(null);
                     FacilityProfile facility = shift != null ? facilityProfileRepository.findById(shift.getFacilityId()).orElse(null) : null;
                     CandidateProfile candidate = candidateProfileRepository.findById(c.getCandidateId()).orElse(null);
+                    User candUser = (candidate != null && candidate.getUserId() != null)
+                            ? userRepository.findById(candidate.getUserId()).orElse(null)
+                            : null;
+                    boolean candIsStudent = candUser != null && "STUDENT".equalsIgnoreCase(candUser.getCandidateLevel());
+                    int shiftMatch = (candidate != null && shift != null)
+                            ? ClinicalMatchingEngine.calculateShiftMatch(candidate, candIsStudent, shift, facility)
+                            : 50;
+
                     return ShiftClaimDto.builder()
                             .id(c.getId())
                             .shiftId(c.getShiftId())
                             .candidateId(c.getCandidateId())
                             .candidateName(candidate != null ? candidate.getName() : "Candidate")
                             .candidateRole(candidate != null ? candidate.getProfession() : "Clinical Practitioner")
-                            .candidateCity(candidate != null ? candidate.getCity() : "Pan-India")
+                            .candidateSpecialty(candidate != null ? candidate.getSpecialty() : null)
+                            .candidateCity(candidate != null ? candidate.getCity() : null)
+                            .candidateQualification(candidate != null ? candidate.getQualification() : null)
+                            .candidateExperience(candidate != null ? candidate.getExperienceYears() : null)
+                            .councilVerified(candidate != null && "VERIFIED".equalsIgnoreCase(candidate.getKycStatus()))
                             .facilityName(facility != null ? facility.getHospitalName() : "Partner Facility")
+                            .facilityCity(facility != null ? facility.getCity() : null)
                             .shiftTitle(shift != null ? shift.getTitle() : "Locum Shift")
                             .department(shift != null ? shift.getDepartment() : "General")
                             .hours(shift != null ? shift.getHours() : 8)
@@ -940,7 +959,7 @@ public class AdminService {
                             .status(c.getStatus())
                             .payoutStatus(c.getPayoutStatus())
                             .claimedAt(c.getClaimedAt())
-                            .matchScore(85)
+                            .matchScore(shiftMatch)
                             .rejectionReason(null)
                             .build();
                 })

@@ -413,17 +413,29 @@ public class FacilityJobManagementService {
                 .createdAt(d.getCreatedAt())
                 .build()).collect(Collectors.toList());
 
+        boolean candIsStudent = user != null && "STUDENT".equalsIgnoreCase(user.getCandidateLevel());
+        int canonicalScore = (candidate != null && job != null)
+                ? ClinicalMatchingEngine.calculateJobMatch(candidate, candIsStudent, job)
+                : app.getMatchScore();
+        FacilityProfile facility = (job != null && job.getFacilityId() != null)
+                ? facilityProfileRepository.findById(job.getFacilityId()).orElse(null)
+                : null;
+
         return JobApplicationDto.builder()
                 .id(app.getId())
                 .jobId(app.getJobId())
                 .jobTitle(job != null ? job.getTitle() : "Position")
+                .facilityName(facility != null ? facility.getHospitalName() : null)
+                .department(job != null ? job.getDepartment() : null)
+                .city(job != null ? job.getCity() : null)
                 .candidateId(app.getCandidateId())
                 .candidateName(candidate != null ? candidate.getName() : "Candidate")
                 .candidateRole(candidate != null ? (candidate.getProfession() != null ? candidate.getProfession() : candidate.getCourse()) : null)
+                .candidateSpecialty(candidate != null ? candidate.getSpecialty() : null)
                 .candidateCity(candidate != null ? candidate.getCity() : null)
                 .candidateExperience(candidate != null ? candidate.getExperienceYears() : null)
                 .councilVerified(candidate != null && "VERIFIED".equalsIgnoreCase(candidate.getKycStatus()))
-                .regNumber(candidate != null && candidate.getRegNumber() != null ? candidate.getRegNumber() : "Council Verified")
+                .regNumber(candidate != null ? candidate.getRegNumber() : null)
                 .candidateQualification(candidate != null ? candidate.getQualification() : null)
                 .candidateCouncil(candidate != null ? candidate.getCouncil() : null)
                 .candidateBio(candidate != null ? candidate.getBio() : null)
@@ -434,7 +446,7 @@ public class FacilityJobManagementService {
                 .resumeFileName(resumeFileName)
                 .candidateDocuments(docDtos)
                 .status(app.getStatus())
-                .matchScore(app.getMatchScore())
+                .matchScore(canonicalScore)
                 .appliedAt(app.getAppliedAt())
                 .interviewScheduledAt(app.getInterviewScheduledAt())
                 .interviewLocationOrLink(app.getInterviewLocationOrLink())
@@ -503,17 +515,27 @@ public class FacilityJobManagementService {
                 .createdAt(d.getCreatedAt())
                 .build()).collect(Collectors.toList());
 
+        FacilityProfile shiftFacility = facilityId != null ? facilityProfileRepository.findById(facilityId).orElse(null) : null;
+        boolean candIsStudent = user != null && "STUDENT".equalsIgnoreCase(user.getCandidateLevel());
+        int canonicalShiftScore = (candidate != null && shift != null)
+                ? ClinicalMatchingEngine.calculateShiftMatch(candidate, candIsStudent, shift, shiftFacility)
+                : 50;
+
         return JobApplicationDto.builder()
                 .id(claim.getId())
                 .jobId(shift != null ? shift.getId() : null)
                 .jobTitle(shift != null ? shift.getTitle() + " (Locum Shift)" : "Locum Shift")
+                .facilityName(shiftFacility != null ? shiftFacility.getHospitalName() : null)
+                .department(shift != null ? shift.getDepartment() : null)
+                .city(shiftFacility != null ? shiftFacility.getCity() : null)
                 .candidateId(claim.getCandidateId())
                 .candidateName(candidate != null ? candidate.getName() : "Candidate")
                 .candidateRole(candidate != null ? (candidate.getProfession() != null ? candidate.getProfession() : "Clinician") : "Clinician")
+                .candidateSpecialty(candidate != null ? candidate.getSpecialty() : null)
                 .candidateCity(candidate != null ? candidate.getCity() : null)
                 .candidateExperience(candidate != null ? candidate.getExperienceYears() : null)
                 .councilVerified(candidate != null && "VERIFIED".equalsIgnoreCase(candidate.getKycStatus()))
-                .regNumber(candidate != null && candidate.getRegNumber() != null ? candidate.getRegNumber() : "Council Verified")
+                .regNumber(candidate != null ? candidate.getRegNumber() : null)
                 .candidateQualification(candidate != null ? candidate.getQualification() : null)
                 .candidateCouncil(candidate != null ? candidate.getCouncil() : null)
                 .candidateBio(candidate != null ? candidate.getBio() : null)
@@ -527,7 +549,7 @@ public class FacilityJobManagementService {
                 .actualHours(claim.getActualHours())
                 .scheduledHours(shift != null ? shift.getHours() : 8)
                 .hourlyRatePaise(shift != null ? shift.getRatePerHour().add(shift.getSurgeRatePerHour() != null ? shift.getSurgeRatePerHour() : BigDecimal.ZERO).multiply(BigDecimal.valueOf(100)).longValue() : 0L)
-                .matchScore(96)
+                .matchScore(canonicalShiftScore)
                 .appliedAt(claim.getClaimedAt())
                 .build();
     }

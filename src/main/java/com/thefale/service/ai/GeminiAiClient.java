@@ -15,69 +15,37 @@ import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
+import java.util.stream.Stream;
 
 @Component
 public class GeminiAiClient implements AiProviderClient {
 
     private static final Logger log = LoggerFactory.getLogger(GeminiAiClient.class);
     private static final List<String> CANDIDATE_MODELS = List.of(
-            "gemini-2.5-flash",
-            "gemini-2.0-flash",
-            "gemini-1.5-flash",
-            "gemini-3.1-flash-lite"
+            "gemini-flash-latest",
+            "gemini-3.5-flash-lite",
+            "gemini-flash-lite-latest"
     );
 
     private final String apiKey;
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
-    private volatile String activeModel = "gemini-2.5-flash";
 
     public GeminiAiClient(
             @Value("${fale.ai.gemini.api-key:${GEMINI_API_KEY:${AI_API_KEY:}}}") String apiKey,
             ObjectMapper objectMapper
     ) {
-        String key = apiKey != null ? apiKey.trim() : "";
-        if (key.isBlank() || key.equalsIgnoreCase("placeholder")) {
-            key = resolveKeyFromDotEnv();
-        }
-        this.apiKey = key;
+        this.apiKey = AiKeyResolver.resolveKey(apiKey, "GEMINI_API_KEY", "AI_API_KEY");
         this.objectMapper = objectMapper;
         this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(20))
+                .connectTimeout(Duration.ofSeconds(8))
                 .build();
         if (isConfigured()) {
-            log.info("Gemini AI Client successfully configured with live API key.");
+            log.info("Gemini AI Client configured with live API key.");
         } else {
-            log.warn("Gemini AI Client has no API key configured. Fallback engine will be active.");
+            log.warn("Gemini AI Client has no API key configured.");
         }
-    }
-
-    private static String resolveKeyFromDotEnv() {
-        try {
-            java.nio.file.Path[] searchPaths = new java.nio.file.Path[] {
-                java.nio.file.Paths.get(".env"),
-                java.nio.file.Paths.get("../.env"),
-                java.nio.file.Paths.get("f:/theFaleOne-Backend/.env")
-            };
-            for (java.nio.file.Path p : searchPaths) {
-                if (java.nio.file.Files.exists(p)) {
-                    List<String> lines = java.nio.file.Files.readAllLines(p);
-                    for (String line : lines) {
-                        String trimmed = line.trim();
-                        if (trimmed.startsWith("GEMINI_API_KEY=")) {
-                            String val = trimmed.substring("GEMINI_API_KEY=".length()).trim();
-                            if (!val.isBlank()) return val;
-                        } else if (trimmed.startsWith("AI_API_KEY=")) {
-                            String val = trimmed.substring("AI_API_KEY=".length()).trim();
-                            if (!val.isBlank()) return val;
-                        }
-                    }
-                }
-            }
-        } catch (Exception e) {
-            log.debug("Could not resolve Gemini API key from .env: {}", e.getMessage());
-        }
-        return "";
     }
 
     @Override
@@ -87,7 +55,7 @@ public class GeminiAiClient implements AiProviderClient {
 
     @Override
     public boolean isConfigured() {
-        return apiKey != null && !apiKey.isBlank() && !apiKey.equalsIgnoreCase("placeholder");
+        return AiKeyResolver.isValidKey(apiKey);
     }
 
     @Override
@@ -96,6 +64,49 @@ public class GeminiAiClient implements AiProviderClient {
             throw new IllegalStateException("Gemini API key is not configured.");
         }
 
+        String jsonPayload = buildJsonPayload(systemPrompt, userPrompt);
+
+        Exception lastException = null;
+        for (String model : CANDIDATE_MODELS) {
+            try {
+                String result = callModel(model, jsonPayload);
+                if (result != null && !result.isBlank()) {
+                    return result;
+                }
+            } catch (NonRetryableGeminiException ex) {
+                throw ex;
+            } catch (Exception ex) {
+                lastException = ex;
+                log.warn("Gemini model {} failed, trying next candidate: {}", model, ex.getMessage());
+            }
+        }
+        throw lastException != null ? lastException : new RuntimeException("All Gemini candidate models failed.");
+    }
+
+    public String streamContent(String systemPrompt, String userPrompt, Consumer<String> onChunk) throws Exception {
+        if (!isConfigured()) {
+            throw new IllegalStateException("Gemini API key is not configured.");
+        }
+
+        String jsonPayload = buildJsonPayload(systemPrompt, userPrompt);
+        Exception lastException = null;
+        for (String model : CANDIDATE_MODELS) {
+            try {
+                String fullText = streamModel(model, jsonPayload, onChunk);
+                if (fullText != null && !fullText.isBlank()) {
+                    return fullText;
+                }
+            } catch (NonRetryableGeminiException ex) {
+                throw ex;
+            } catch (Exception ex) {
+                lastException = ex;
+                log.warn("Gemini stream model {} failed, trying next candidate: {}", model, ex.getMessage());
+            }
+        }
+        throw lastException != null ? lastException : new RuntimeException("All Gemini streaming models failed.");
+    }
+
+    private String buildJsonPayload(String systemPrompt, String userPrompt) throws Exception {
         Map<String, Object> requestBody = new HashMap<>();
         if (systemPrompt != null && !systemPrompt.isBlank()) {
             requestBody.put("systemInstruction", Map.of(
@@ -107,25 +118,21 @@ public class GeminiAiClient implements AiProviderClient {
         ));
         requestBody.put("generationConfig", Map.of(
                 "maxOutputTokens", 1024,
-                "temperature", 0.7
+                "temperature", 0.4
         ));
+        return objectMapper.writeValueAsString(requestBody);
+    }
 
-        String jsonPayload = objectMapper.writeValueAsString(requestBody);
-
-        Exception lastException = null;
-        for (String model : CANDIDATE_MODELS) {
-            try {
-                String result = callModel(model, jsonPayload);
-                if (result != null && !result.isBlank()) {
-                    this.activeModel = model;
-                    return result;
-                }
-            } catch (Exception ex) {
-                lastException = ex;
-                log.warn("Gemini model {} failed (e.g. 503 spike), trying next candidate: {}", model, ex.getMessage());
+    private String extractCandidateText(String body) throws Exception {
+        JsonNode root = objectMapper.readTree(body);
+        JsonNode candidates = root.path("candidates");
+        if (candidates.isArray() && !candidates.isEmpty()) {
+            JsonNode parts = candidates.get(0).path("content").path("parts");
+            if (parts.isArray() && !parts.isEmpty()) {
+                return parts.get(0).path("text").asText("");
             }
         }
-        throw lastException != null ? lastException : new RuntimeException("All Gemini candidate models failed.");
+        return "";
     }
 
     private String callModel(String model, String jsonPayload) throws Exception {
@@ -134,24 +141,71 @@ public class GeminiAiClient implements AiProviderClient {
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(url))
                 .header("Content-Type", "application/json")
-                .timeout(Duration.ofSeconds(60))
+                .timeout(Duration.ofSeconds(20))
                 .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
                 .build();
 
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
         if (response.statusCode() >= 200 && response.statusCode() < 300) {
-            JsonNode root = objectMapper.readTree(response.body());
-            JsonNode candidates = root.path("candidates");
-            if (candidates.isArray() && !candidates.isEmpty()) {
-                JsonNode parts = candidates.get(0).path("content").path("parts");
-                if (parts.isArray() && !parts.isEmpty()) {
-                    return parts.get(0).path("text").asText("");
-                }
+            return extractCandidateText(response.body());
+        }
+
+        String msg = "Gemini HTTP " + response.statusCode() + " on " + model + ": " + response.body();
+        if (response.statusCode() == 400 || response.statusCode() == 401 || response.statusCode() == 403) {
+            throw new NonRetryableGeminiException(msg);
+        }
+        throw new RuntimeException(msg);
+    }
+
+    private String streamModel(String model, String jsonPayload, Consumer<String> onChunk) throws Exception {
+        String url = "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":streamGenerateContent?alt=sse&key=" + apiKey;
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .header("Content-Type", "application/json")
+                .timeout(Duration.ofSeconds(30))
+                .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
+                .build();
+
+        HttpResponse<Stream<String>> response = httpClient.send(request, HttpResponse.BodyHandlers.ofLines());
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            String errBody;
+            try (Stream<String> lines = response.body()) {
+                errBody = lines.limit(20).reduce("", (a, b) -> a + b);
             }
-            return "";
-        } else {
-            throw new RuntimeException("Gemini HTTP " + response.statusCode() + " on " + model + ": " + response.body());
+            String msg = "Gemini stream HTTP " + response.statusCode() + " on " + model + ": " + errBody;
+            if (response.statusCode() == 400 || response.statusCode() == 401 || response.statusCode() == 403) {
+                throw new NonRetryableGeminiException(msg);
+            }
+            throw new RuntimeException(msg);
+        }
+
+        StringBuilder full = new StringBuilder();
+        try (Stream<String> lines = response.body()) {
+            lines.forEach(line -> {
+                if (line == null || !line.startsWith("data:")) return;
+                String json = line.substring(5).trim();
+                if (json.isEmpty() || "[DONE]".equals(json)) return;
+                try {
+                    String piece = extractCandidateText(json);
+                    if (piece != null && !piece.isEmpty()) {
+                        full.append(piece);
+                        if (onChunk != null) {
+                            onChunk.accept(piece);
+                        }
+                    }
+                } catch (Exception ignored) {
+                    // Ignore partial or heartbeat lines
+                }
+            });
+        }
+        return full.toString();
+    }
+
+    private static final class NonRetryableGeminiException extends RuntimeException {
+        NonRetryableGeminiException(String message) {
+            super(message);
         }
     }
 }

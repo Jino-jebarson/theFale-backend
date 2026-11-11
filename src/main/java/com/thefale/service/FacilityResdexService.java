@@ -6,6 +6,7 @@ import com.thefale.entity.CandidateProfile;
 import com.thefale.entity.CandidateProfileView;
 import com.thefale.entity.FacilityProfile;
 import com.thefale.entity.FacilityWallet;
+import com.thefale.entity.JobPosting;
 import com.thefale.entity.UnlockedCandidate;
 import com.thefale.entity.User;
 import com.thefale.exception.BadRequestException;
@@ -15,6 +16,7 @@ import com.thefale.repository.CandidateProfileRepository;
 import com.thefale.repository.CandidateProfileViewRepository;
 import com.thefale.repository.FacilityProfileRepository;
 import com.thefale.repository.FacilityWalletRepository;
+import com.thefale.repository.JobPostingRepository;
 import com.thefale.repository.UnlockedCandidateRepository;
 import com.thefale.repository.UserRepository;
 import com.thefale.security.CustomUserPrincipal;
@@ -39,6 +41,7 @@ public class FacilityResdexService {
     private final UnlockedCandidateRepository unlockedCandidateRepository;
     private final CandidateDocumentRepository candidateDocumentRepository;
     private final CandidateProfileViewRepository candidateProfileViewRepository;
+    private final JobPostingRepository jobPostingRepository;
     private final UserRepository userRepository;
     private final AuditLogService auditLogService;
 
@@ -58,7 +61,7 @@ public class FacilityResdexService {
                 })
                 .filter(c -> specialty == null || specialty.equalsIgnoreCase("All") || specialty.equalsIgnoreCase(c.getSpecialty()) || specialty.equalsIgnoreCase(c.getProfession()))
                 .filter(c -> city == null || city.equalsIgnoreCase("All") || city.equalsIgnoreCase(c.getCity()))
-                .map(c -> mapToResdexDto(c, facility.getId()))
+                .map(c -> mapToResdexDto(c, facility))
                 .collect(Collectors.toList());
     }
 
@@ -101,12 +104,20 @@ public class FacilityResdexService {
             auditLogService.logEvent(principal.getId(), "CANDIDATE_CONTACT_UNLOCKED", "CandidateProfile", candidate.getId().toString(), null);
         }
 
-        return mapToResdexDto(candidate, facility.getId());
+        return mapToResdexDto(candidate, facility);
     }
 
-    private CandidateResdexDto mapToResdexDto(CandidateProfile candidate, UUID facilityId) {
-        boolean isUnlocked = unlockedCandidateRepository.existsByFacilityIdAndCandidateId(facilityId, candidate.getId());
+    private CandidateResdexDto mapToResdexDto(CandidateProfile candidate, FacilityProfile facility) {
+        UUID facilityId = facility != null ? facility.getId() : null;
+        boolean isUnlocked = facilityId != null && unlockedCandidateRepository.existsByFacilityIdAndCandidateId(facilityId, candidate.getId());
         User candidateUser = userRepository.findById(candidate.getUserId()).orElse(null);
+        List<JobPosting> facilityJobs = facilityId != null
+                ? jobPostingRepository.findByFacilityIdAndDeletedAtIsNull(facilityId).stream()
+                        .filter(j -> "OPEN".equalsIgnoreCase(j.getStatus()))
+                        .toList()
+                : List.of();
+        boolean isStudent = candidateUser != null && "STUDENT".equalsIgnoreCase(candidateUser.getCandidateLevel());
+        int computedMatch = ClinicalMatchingEngine.calculateResdexMatch(candidate, isStudent, facility, facilityJobs);
 
         List<CandidateDocument> docs = candidateDocumentRepository.findByCandidateId(candidate.getId());
         CandidateDocument resumeDoc = docs.stream()
@@ -140,7 +151,7 @@ public class FacilityResdexService {
                 .regNumber(displayReg)
                 .regNumberMasked(maskedReg)
                 .experienceYears(candidate.getExperienceYears() != null ? candidate.getExperienceYears() : "1 year")
-                .matchScore(94)
+                .matchScore(computedMatch)
                 .contactUnlocked(isUnlocked)
                 .phone(displayPhone)
                 .email(displayEmail)

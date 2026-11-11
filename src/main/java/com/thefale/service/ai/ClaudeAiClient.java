@@ -28,10 +28,10 @@ public class ClaudeAiClient implements AiProviderClient {
             @Value("${fale.ai.claude.api-key:${CLAUDE_API_KEY:${ANTHROPIC_API_KEY:}}}") String apiKey,
             ObjectMapper objectMapper
     ) {
-        this.apiKey = apiKey != null ? apiKey.trim() : "";
+        this.apiKey = AiKeyResolver.resolveKey(apiKey, "CLAUDE_API_KEY", "ANTHROPIC_API_KEY");
         this.objectMapper = objectMapper;
         this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(15))
+                .connectTimeout(Duration.ofSeconds(8))
                 .build();
     }
 
@@ -42,7 +42,7 @@ public class ClaudeAiClient implements AiProviderClient {
 
     @Override
     public boolean isConfigured() {
-        return apiKey != null && !apiKey.isBlank() && !apiKey.equalsIgnoreCase("placeholder");
+        return AiKeyResolver.isValidKey(apiKey);
     }
 
     @Override

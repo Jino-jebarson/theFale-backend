@@ -142,12 +142,12 @@ public class CandidateController {
 
     @GetMapping("/me/export-cv")
     @PreAuthorize("hasRole('CANDIDATE')")
-    @Operation(summary = "Export standardized verified CV")
-    public ResponseEntity<ApiResponse<String>> exportCv(
+    @Operation(summary = "Fetch standardized live candidate data for CV export")
+    public ResponseEntity<ApiResponse<CandidateProfileDto>> exportCv(
             @AuthenticationPrincipal CustomUserPrincipal principal
     ) {
-        String cvUrl = candidateService.exportCv(principal);
-        return ResponseEntity.ok(ApiResponse.success("CV exported successfully", cvUrl));
+        CandidateProfileDto profile = candidateService.exportCv(principal);
+        return ResponseEntity.ok(ApiResponse.success("CV data exported successfully", profile));
     }
 
     @GetMapping({"/me/view-stats", "/view-stats"})

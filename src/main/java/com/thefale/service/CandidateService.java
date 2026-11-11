@@ -462,11 +462,8 @@ public class CandidateService {
     }
 
     @Transactional(readOnly = true)
-    public String exportCv(CustomUserPrincipal principal) {
-        CandidateProfile profile = profileRepository.findByUserId(principal.getId())
-                .orElseThrow(() -> new ResourceNotFoundException("Candidate profile not found"));
-        // Generates standardized verified CV URL reference
-        return "https://api.thefale.com/api/v1/candidates/me/export-cv/" + profile.getId() + ".pdf";
+    public CandidateProfileDto exportCv(CustomUserPrincipal principal) {
+        return getCandidateProfile(principal);
     }
 
     private void recordDocumentIfPresent(UUID candidateId, String docType, String fileUrl, String defaultName) {
