@@ -75,32 +75,13 @@ When started:
 
 ---
 
-## 5. Running the Vite Frontend (Dual Mode)
+## 5. Running the API-only frontend
 
-Navigate to the frontend directory `theFaleOne-Frontend\FALE-healthcare-ui`:
+From `theFaleOne-Frontend\FALE-healthcare-ui`, set `VITE_API_URL=http://localhost:8080/api/v1` and run `npm run dev`. The retired `VITE_USE_API` switch no longer enables an offline demo. Restart Vite after environment changes and rebuild production assets.
 
-### A. Dynamic API Mode (`VITE_USE_API=true`)
-In `FALE-healthcare-ui\.env`:
-```env
-VITE_USE_API=true
-VITE_API_URL=http://localhost:8080/api/v1
-```
-Or in PowerShell:
-```powershell
-$env:VITE_USE_API="true"
-npm run dev
-```
-In API mode:
-- No static or mock data from `data.ts` or `store.ts` is shown on any screen.
-- All persisted mock data in `localStorage` (`fale-pro-v2`) is automatically cleared.
-- All data is fetched live from the backend REST API with loading spinners, empty states, and error handling.
+Business records come from the backend; empty responses stay empty and outages show errors. The old browser demo store is discarded without deleting database records. Healthcare reference lists and course curriculum remain available as content.
 
-### B. Static Mock Mode (`VITE_USE_API=false`)
-```env
-VITE_USE_API=false
-```
-In mock mode:
-- The app operates offline with rich realistic mock data stored in `localStorage` and `src/lib/data.ts`.
+DigiLocker and SMS provider delivery are not connected. Development OTP codes are still generated randomly and logged when development OTP mode is enabled; production OTP requests report unavailable SMS delivery. Bank/UPI details are saved pending ownership verification, and new unverified hospital bank accounts cannot fund wallets or purchase credits. Complete facility onboarding before accessing facility services.
 
 ---
 

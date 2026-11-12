@@ -127,9 +127,9 @@ public class FacilityResdexService {
         String resumeUrl = isUnlocked && resumeDoc != null ? resumeDoc.getFileUrl() : null;
         String resumeFileName = isUnlocked && resumeDoc != null ? resumeDoc.getOriginalFileName() : null;
 
-        String rawPhone = candidateUser != null && candidateUser.getPhone() != null ? candidateUser.getPhone() : "+91 98401 23456";
-        String rawEmail = candidateUser != null && candidateUser.getEmail() != null ? candidateUser.getEmail() : "candidate@fale.care";
-        String rawReg = candidate.getRegNumber() != null ? candidate.getRegNumber() : "Council Verified";
+        String rawPhone = candidateUser != null && candidateUser.getPhone() != null ? candidateUser.getPhone() : null;
+        String rawEmail = candidateUser != null && candidateUser.getEmail() != null ? candidateUser.getEmail() : null;
+        String rawReg = candidate.getRegNumber() != null ? candidate.getRegNumber() : null;
 
         String maskedPhone = maskPhone(rawPhone);
         String maskedEmail = maskEmail(rawEmail);
@@ -142,15 +142,15 @@ public class FacilityResdexService {
         return CandidateResdexDto.builder()
                 .candidateId(candidate.getId())
                 .name(candidate.getName())
-                .city(candidate.getCity() != null ? candidate.getCity() : "Chennai")
+                .city(candidate.getCity())
                 .candidateLevel(candidateUser != null ? candidateUser.getCandidateLevel() : "PROFESSIONAL")
                 .profession(candidate.getProfession() != null ? candidate.getProfession() : "Clinician")
                 .specialty(candidate.getSpecialty() != null ? candidate.getSpecialty() : candidate.getProfession())
-                .qualification(candidate.getQualification() != null ? candidate.getQualification() : "MBBS / Healthcare")
-                .council(candidate.getCouncil() != null ? candidate.getCouncil() : "State Medical Council")
+                .qualification(candidate.getQualification())
+                .council(candidate.getCouncil())
                 .regNumber(displayReg)
                 .regNumberMasked(maskedReg)
-                .experienceYears(candidate.getExperienceYears() != null ? candidate.getExperienceYears() : "1 year")
+                .experienceYears(candidate.getExperienceYears())
                 .matchScore(computedMatch)
                 .contactUnlocked(isUnlocked)
                 .phone(displayPhone)

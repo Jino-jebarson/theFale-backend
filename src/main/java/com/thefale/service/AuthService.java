@@ -96,8 +96,8 @@ public class AuthService {
             log.info("[DEV OTP CONSOLE] Contact: {} | Code: {}", cleanPhone, otpCode);
             log.info("=================================================");
         } else {
-            // Production SMS dispatch integration
-            log.info("Production SMS dispatched to masked phone: ***{}", cleanPhone.substring(Math.max(0, cleanPhone.length() - 4)));
+            // Do not report delivery until a real SMS provider is configured.
+            throw new BadRequestException("SMS delivery is not configured. Please contact support.");
         }
 
         return OtpSendResponse.builder()

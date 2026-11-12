@@ -47,56 +47,10 @@ public class FacilityService {
     private final AuditLogService auditLogService;
     private final ObjectMapper objectMapper;
 
-    @Transactional
+    @Transactional(readOnly = true)
     public FacilityProfile getOrCreateFacilityProfile(CustomUserPrincipal principal) {
         return facilityProfileRepository.findByUserId(principal.getId())
-                .orElseGet(() -> {
-                    User user = userRepository.findById(principal.getId())
-                            .orElseThrow(() -> new ResourceNotFoundException("User not found"));
-
-                    String phone = user.getPhone() != null && !user.getPhone().isBlank() ? user.getPhone()
-                            : "+919999933333";
-                    String email = user.getEmail() != null && !user.getEmail().isBlank() ? user.getEmail()
-                            : ("facility." + user.getId().toString().substring(0, 8) + "@thefale.com");
-
-                    FacilityProfile newProfile = FacilityProfile.builder()
-                            .userId(principal.getId())
-                            .hospitalName("Healthcare Facility")
-                            .facilityType("Multispecialty Hospital")
-                            .city("Chennai")
-                            .state("Tamil Nadu")
-                            .pincode("600001")
-                            .addressLine("Hospital Campus")
-                            .beds(50)
-                            .icuBeds(10)
-                            .licenseNumber("CEA-REG-PENDING")
-                            .contactPerson("Facility Administrator")
-                            .contactPhone(phone)
-                            .contactEmail(email)
-                            .kycStatus("PENDING")
-                            .build();
-
-                    FacilityProfile saved = facilityProfileRepository.save(newProfile);
-
-                    if (facilityWalletRepository.findByFacilityId(saved.getId()).isEmpty()) {
-                        FacilityWallet wallet = FacilityWallet.builder()
-                                .facilityId(saved.getId())
-                                .availableBalance(BigDecimal.ZERO)
-                                .lockedEscrowBalance(BigDecimal.ZERO)
-                                .totalDisbursed(BigDecimal.ZERO)
-                                .candidateCredits(3)
-                                .build();
-                        facilityWalletRepository.save(wallet);
-                    }
-
-                    user.setOnboarded(true);
-                    userRepository.save(user);
-
-                    auditLogService.logEvent(principal.getId(), "FACILITY_AUTO_INITIALIZED", "FacilityProfile",
-                            saved.getId().toString(), null);
-
-                    return saved;
-                });
+                .orElseThrow(() -> new BadRequestException("Complete facility onboarding before using facility services."));
     }
 
     @Transactional
@@ -133,14 +87,14 @@ public class FacilityService {
 
         FacilityProfile saved = facilityProfileRepository.save(facility);
 
-        // Initialize institutional wallet with 3 free credits
+        // New wallets start empty; purchased credits come from confirmed transactions.
         if (facilityWalletRepository.findByFacilityId(saved.getId()).isEmpty()) {
             FacilityWallet wallet = FacilityWallet.builder()
                     .facilityId(saved.getId())
                     .availableBalance(BigDecimal.ZERO)
                     .lockedEscrowBalance(BigDecimal.ZERO)
                     .totalDisbursed(BigDecimal.ZERO)
-                    .candidateCredits(3)
+                    .candidateCredits(0)
                     .build();
             facilityWalletRepository.save(wallet);
         }
@@ -291,8 +245,9 @@ public class FacilityService {
         account.setBranch(request.getBranch() != null ? request.getBranch().trim() : "Main Branch");
         account.setAccountHolderName(request.getAccountHolderName().trim());
         account.setAccountType(request.getAccountType() != null ? request.getAccountType().trim() : "Current");
-        account.setStatus("Verified"); // Verified via penny drop
-        account.setVerifiedAt(Instant.now());
+        // A provider confirmation is required before marking this account verified.
+        account.setStatus("Under Review");
+        account.setVerifiedAt(null);
 
         HospitalBankAccount saved = hospitalBankAccountRepository.save(account);
         auditLogService.logEvent(principal.getId(), "HOSPITAL_BANK_ACCOUNT_UPDATED", "HospitalBankAccount",

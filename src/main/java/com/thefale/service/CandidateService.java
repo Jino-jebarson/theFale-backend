@@ -362,8 +362,9 @@ public class CandidateService {
             method.setAccountNumberLast4(request.getAccountNumber().substring(request.getAccountNumber().length() - 4));
         }
 
-        method.setStatus("Verified"); // Instant verification for dev/demo or Penny Drop in production
-        method.setVerifiedAt(Instant.now());
+        // Saving details is not proof of bank/UPI ownership.
+        method.setStatus("Pending");
+        method.setVerifiedAt(null);
 
         CandidatePayoutMethod saved = payoutMethodRepository.save(method);
         return mapPayoutMethodToDto(saved);

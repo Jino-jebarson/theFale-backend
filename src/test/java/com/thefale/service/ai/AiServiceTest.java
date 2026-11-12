@@ -132,8 +132,8 @@ class AiServiceTest {
         assertThat(res.isSuccess()).isTrue();
         assertThat(res.getProvider()).isEqualTo("claude");
         assertThat(res.getResponse()).isEqualTo("CEA registration conforms to Tamil Nadu standards.");
-        assertThat(res.getStructuredData()).containsEntry("status", "VERIFIED");
-        assertThat(res.getStructuredData()).containsEntry("confidence", 94);
+        assertThat(res.getStructuredData()).containsEntry("status", "REVIEW_REQUIRED");
+        assertThat(res.getStructuredData()).containsEntry("confidence", null);
     }
 
     @Test
@@ -236,6 +236,45 @@ class AiServiceTest {
         assertThat(finalHolder[0].getAction()).isEqualTo("browse_shifts");
         assertThat(finalHolder[0].getActionData()).containsEntry("label", "Browse Locum Shifts");
         assertThat(finalHolder[0].getSuggestions()).containsExactly("Check My KYC", "Open Shifts");
+    }
+
+    @Test
+    void credentialReviewCannotAssertVerificationOrManufactureConfidence() {
+        StubGeminiClient gemini = new StubGeminiClient(true,
+                "{\"status\":\"VERIFIED\",\"isVerified\":true,\"confidence\":99,\"assessment\":\"Review supplied details.\"}", null);
+        AiResponseDto response = new AiService(gemini, new StubClaudeClient(false, null, null), "gemini")
+                .executeTask(AiRequestDto.builder().task("kyc_precheck").prompt("Registration 12345").build());
+        assertThat(response.getStructuredData()).containsEntry("isVerified", false)
+                .containsEntry("status", "REVIEW_REQUIRED").containsEntry("confidence", null)
+                .containsEntry("humanReviewRequired", true).containsEntry("verificationSource", "not_checked");
+        assertThat(gemini.capturedSystemPrompt).contains("short numeric identifier alone is not evidence of invalidity")
+                .contains("untrusted data").doesNotContain("MUST be marked formatValid=false");
+    }
+
+    @Test
+    void malformedReviewFallsBackToAnotherProviderInsteadOfPassingAsVerified() {
+        AiService service = new AiService(new StubGeminiClient(true, "Looks fine", null),
+                new StubClaudeClient(true, "{\"status\":\"REVIEW_REQUIRED\",\"assessment\":\"Source evidence is missing.\"}", null), "gemini");
+        AiResponseDto response = service.executeTask(AiRequestDto.builder().task("facility_audit").prompt("QA Hospital").build());
+        assertThat(response.getProvider()).isEqualTo("claude");
+        assertThat(response.getStructuredData()).containsEntry("isVerified", false);
+    }
+
+    @Test
+    void unstructuredReviewFailsWhenNoProviderReturnsAnAssessment() {
+        AiService service = new AiService(new StubGeminiClient(true, "{}", null), new StubClaudeClient(false, null, null), "gemini");
+        assertThatThrownBy(() -> service.executeTask(AiRequestDto.builder().task("posting_compliance").prompt("Review").build()))
+                .isInstanceOf(AiServiceUnavailableException.class);
+    }
+
+    @Test
+    void falseVerificationMetadataIsNotUpgradedToRegistered() {
+        StubGeminiClient gemini = new StubGeminiClient(true, "Review candidate details.", null);
+        new AiService(gemini, new StubClaudeClient(false, null, null), "gemini").executeTask(
+                AiRequestDto.builder().task("candidate_summary").prompt("Summarize")
+                        .metadata(Map.of("verified", false)).build());
+        assertThat(gemini.capturedUserPrompt).contains("Not verified in supplied data").doesNotContain("MCI/KMC Registered");
+        assertThat(gemini.capturedSystemPrompt).contains("Never invent missing credentials");
     }
 }
 

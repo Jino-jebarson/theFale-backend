@@ -51,11 +51,6 @@ public class FacilityWalletService {
                         .candidateCredits(0)
                         .build()));
 
-        // Self-heal legacy wallet rows that were created with the old static default of 3
-        if (wallet.getCandidateCredits() == 3) {
-            wallet.setCandidateCredits(0);
-            wallet = facilityWalletRepository.save(wallet);
-        }
 
         return mapWalletToDto(wallet);
     }
@@ -82,7 +77,8 @@ public class FacilityWalletService {
     public FacilityWalletDto topUp(CustomUserPrincipal principal, WalletTopUpRequest request) {
         FacilityProfile facility = facilityService.getOrCreateFacilityProfile(principal);
 
-        if (hospitalBankAccountRepository.findByFacilityId(facility.getId()).isEmpty()) {
+        if (hospitalBankAccountRepository.findByFacilityId(facility.getId())
+                .filter(account -> "Verified".equalsIgnoreCase(account.getStatus())).isEmpty()) {
             throw new BadRequestException("Hospital settlement bank account must be linked and verified before topping up escrow.");
         }
 
@@ -135,7 +131,8 @@ public class FacilityWalletService {
     public FacilityWalletDto buyCredits(CustomUserPrincipal principal, BuyCreditsRequest request) {
         FacilityProfile facility = facilityService.getOrCreateFacilityProfile(principal);
 
-        if (hospitalBankAccountRepository.findByFacilityId(facility.getId()).isEmpty()) {
+        if (hospitalBankAccountRepository.findByFacilityId(facility.getId())
+                .filter(account -> "Verified".equalsIgnoreCase(account.getStatus())).isEmpty()) {
             throw new BadRequestException("Hospital settlement bank account must be linked and verified before purchasing sourcing credits.");
         }
 
