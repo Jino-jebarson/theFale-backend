@@ -50,6 +50,15 @@ public class JobApplicationDto {
     private Integer actualHours;
     private Integer scheduledHours;
     private Long hourlyRatePaise;
+    private String checkInPin;
+    private String disputeReason;
+    private Integer hospitalRating;
+    private String hospitalReview;
+    private String ratingTags;
+    private java.time.Instant ratedAt;
+    private Double candidateRatingAvg;
+    private Integer candidateRatingCount;
+    private Integer completedShiftsCount;
 
     public String getPhone() {
         return candidatePhone;

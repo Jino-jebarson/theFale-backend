@@ -2,11 +2,14 @@ package com.thefale.controller;
 
 import com.thefale.dto.ApiResponse;
 import com.thefale.dto.CompleteShiftRequest;
+import com.thefale.dto.RateShiftClaimRequest;
+import com.thefale.dto.ShiftCheckInRequest;
 import com.thefale.dto.ShiftClaimDto;
 import com.thefale.security.CustomUserPrincipal;
 import com.thefale.service.ShiftClaimService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -35,11 +38,12 @@ public class CandidateEarningsController {
 
     @PostMapping("/{id}/check-in")
     @PreAuthorize("hasRole('CANDIDATE')")
-    @Operation(summary = "Check in on hospital floor for claimed shift duty")
+    @Operation(summary = "Check in on hospital floor for confirmed shift duty with PIN verification")
     public ResponseEntity<ApiResponse<ShiftClaimDto>> checkIn(
             @AuthenticationPrincipal CustomUserPrincipal principal,
-            @PathVariable UUID id) {
-        ShiftClaimDto claim = shiftClaimService.checkIn(principal, id);
+            @PathVariable UUID id,
+            @RequestBody(required = false) ShiftCheckInRequest request) {
+        ShiftClaimDto claim = shiftClaimService.checkIn(principal, id, request);
         return ResponseEntity.ok(ApiResponse.success("Checked in to shift duty successfully", claim));
     }
 
@@ -60,9 +64,24 @@ public class CandidateEarningsController {
     public ResponseEntity<ApiResponse<ShiftClaimDto>> disputeShift(
             @AuthenticationPrincipal CustomUserPrincipal principal,
             @PathVariable UUID id,
-            @RequestParam(required = false) String reason) {
-        ShiftClaimDto claim = shiftClaimService.disputeShift(principal, id, reason);
+            @RequestParam(required = false) String reason,
+            @RequestBody(required = false) java.util.Map<String, String> body) {
+        String effectiveReason = (reason != null && !reason.isBlank())
+                ? reason
+                : (body != null ? body.get("reason") : null);
+        ShiftClaimDto claim = shiftClaimService.disputeShift(principal, id, effectiveReason);
         return ResponseEntity.ok(ApiResponse.success("Shift duty marked disputed for admin mediation", claim));
+    }
+
+    @PostMapping("/{id}/rate")
+    @PreAuthorize("hasRole('FACILITY')")
+    @Operation(summary = "Submit 1-5 star hospital performance rating for a completed shift")
+    public ResponseEntity<ApiResponse<ShiftClaimDto>> rateShiftClaim(
+            @AuthenticationPrincipal CustomUserPrincipal principal,
+            @PathVariable UUID id,
+            @Valid @RequestBody RateShiftClaimRequest request) {
+        ShiftClaimDto claim = shiftClaimService.rateShiftClaim(principal, id, request);
+        return ResponseEntity.ok(ApiResponse.success("Clinician shift rating recorded successfully", claim));
     }
 
     @PostMapping("/{id}/cancel")

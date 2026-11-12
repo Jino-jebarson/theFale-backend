@@ -44,4 +44,16 @@ public class ShiftClaimDto {
     private boolean councilVerified;
     private String facilityCity;
     private String rejectionReason;
+    private double platformFeePercent;
+    private boolean firstShiftFree;
+    private String checkInPin;
+    private String disputeReason;
+    private Instant disputedAt;
+    private Integer hospitalRating;
+    private String hospitalReview;
+    private String ratingTags;
+    private Instant ratedAt;
+    private Double candidateRatingAvg;
+    private Integer candidateRatingCount;
+    private Integer completedShiftsCount;
 }

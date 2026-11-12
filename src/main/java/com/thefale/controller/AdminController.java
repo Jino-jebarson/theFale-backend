@@ -341,6 +341,23 @@ public class AdminController {
         return ResponseEntity.ok(ApiResponse.success(claims));
     }
 
+    @GetMapping("/shifts/claims/disputed")
+    @Operation(summary = "Get disputed shift claims requiring admin mediation")
+    public ResponseEntity<ApiResponse<List<ShiftClaimDto>>> getDisputedShiftClaims() {
+        List<ShiftClaimDto> claims = adminService.getDisputedShiftClaims();
+        return ResponseEntity.ok(ApiResponse.success(claims));
+    }
+
+    @PostMapping("/shifts/claims/{id}/resolve-dispute")
+    @Operation(summary = "Resolve a disputed shift claim (release, partial split, or refund hospital)")
+    public ResponseEntity<ApiResponse<Void>> resolveShiftDispute(
+            @AuthenticationPrincipal CustomUserPrincipal principal,
+            @PathVariable UUID id,
+            @Valid @RequestBody ResolveDisputeRequest request) {
+        adminService.resolveShiftDispute(principal, id, request);
+        return ResponseEntity.ok(ApiResponse.success("Shift dispute resolved cleanly"));
+    }
+
     @RequestMapping(value = {"/shifts/claims/{id}/screening", "/shifts/claims/{id}/screen"}, method = {RequestMethod.PATCH, RequestMethod.POST})
     @Operation(summary = "Screen shift claim: APPROVE or REJECT")
     public ResponseEntity<ApiResponse<Void>> screenShiftClaim(

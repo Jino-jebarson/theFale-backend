@@ -45,6 +45,8 @@ public class AdminService {
     private final FacilityDocumentRepository facilityDocumentRepository;
     private final HuddleService huddleService;
     private final MentorApplicationRepository mentorApplicationRepository;
+    private final ShiftManagementService shiftManagementService;
+    private final PlatformSettingRepository platformSettingRepository;
 
     @Transactional(readOnly = true)
     public AdminDashboardMetricsDto getDashboardMetrics() {
@@ -534,11 +536,14 @@ public class AdminService {
 
     @Transactional
     public void disbursePayout(CustomUserPrincipal principal, UUID claimId, AdminPayoutApprovalRequest request) {
-        ShiftClaim claim = shiftClaimRepository.findById(claimId)
+        ShiftClaim claim = shiftClaimRepository.findByIdWithLock(claimId)
                 .orElseThrow(() -> new ResourceNotFoundException("Shift claim not found"));
 
+        if (!"COMPLETED".equalsIgnoreCase(claim.getStatus())) {
+            throw new BadRequestException("Cannot disburse payout before timesheet is COMPLETED. Current status: " + claim.getStatus());
+        }
         if (!"PENDING_DISBURSEMENT".equalsIgnoreCase(claim.getPayoutStatus())) {
-            throw new BadRequestException("Claim is not pending disbursement. Current status: " + claim.getPayoutStatus());
+            throw new BadRequestException("Claim is not pending disbursement. Current payout status: " + claim.getPayoutStatus());
         }
 
         LocumShift shift = locumShiftRepository.findById(claim.getShiftId())
@@ -549,25 +554,31 @@ public class AdminService {
         claim.setDisbursedAt(Instant.now());
         shiftClaimRepository.save(claim);
 
-        // Update facility wallet: release locked escrow to disbursed
+        // Settle worker gross + proportional facility fee from locked escrow -> totalDisbursed
+        BigDecimal facFeePct = shift.getFacilityFeePercent() != null ? shift.getFacilityFeePercent() : BigDecimal.ZERO;
+        BigDecimal slotFacFee = claim.getGrossAmount().multiply(facFeePct)
+                .divide(BigDecimal.valueOf(100), 2, java.math.RoundingMode.HALF_UP);
+        BigDecimal totalEscrowSettle = claim.getGrossAmount().add(slotFacFee);
+
         FacilityWallet wallet = facilityWalletRepository.findByFacilityIdWithLock(shift.getFacilityId())
                 .orElseThrow(() -> new ResourceNotFoundException("Facility wallet not found"));
 
-        wallet.setLockedEscrowBalance(wallet.getLockedEscrowBalance().subtract(claim.getGrossAmount()));
-        wallet.setTotalDisbursed(wallet.getTotalDisbursed().add(claim.getGrossAmount()));
+        BigDecimal safeSub = totalEscrowSettle.min(wallet.getLockedEscrowBalance());
+        wallet.setLockedEscrowBalance(wallet.getLockedEscrowBalance().subtract(safeSub));
+        wallet.setTotalDisbursed(wallet.getTotalDisbursed().add(totalEscrowSettle));
         facilityWalletRepository.save(wallet);
 
         String refNum = "DISB-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
         WalletTransaction tx = WalletTransaction.builder()
                 .walletId(wallet.getId())
                 .type("disbursement")
-                .amount(claim.getGrossAmount().negate())
+                .amount(totalEscrowSettle.negate())
                 .balanceAfter(wallet.getAvailableBalance())
                 .status("Completed")
                 .refNumber(refNum)
                 .utr(request.getUtr().trim().toUpperCase())
                 .title("Disbursement: " + shift.getTitle())
-                .subtitle("Net credited to clinician: ₹" + claim.getNetAmount() + " (UTR: " + request.getUtr() + ")")
+                .subtitle("Net to clinician: ₹" + claim.getNetAmount() + " · Facility Fee: ₹" + slotFacFee + " (UTR: " + request.getUtr() + ")")
                 .build();
         walletTransactionRepository.save(tx);
 
@@ -809,6 +820,7 @@ public class AdminService {
                             .city(facility != null && facility.getCity() != null ? facility.getCity() : "Pan-India")
                             .title(s.getTitle())
                             .department(s.getDepartment())
+                            .description(s.getDescription())
                             .startAt(s.getStartAt())
                             .endAt(s.getEndAt())
                             .hours(s.getHours())
@@ -816,6 +828,9 @@ public class AdminService {
                             .surgeRatePerHourPaise(s.getSurgeRatePerHour().multiply(BigDecimal.valueOf(100)).longValue())
                             .surgeLabel(s.getSurgeLabel())
                             .totalPayPaise(totalPay.multiply(BigDecimal.valueOf(100)).longValue())
+                            .facilityFeePercent(s.getFacilityFeePercent() != null ? s.getFacilityFeePercent().doubleValue() : 0.0)
+                            .facilityFeePaise(s.getFacilityFeeAmount() != null ? s.getFacilityFeeAmount().multiply(BigDecimal.valueOf(100)).longValue() : 0L)
+                            .autoApproved(s.isAutoApproved())
                             .openings(s.getOpenings())
                             .slotsClaimed(s.getSlotsClaimed())
                             .urgent(s.isUrgent())
@@ -835,6 +850,10 @@ public class AdminService {
         LocumShift shift = locumShiftRepository.findByIdWithLock(shiftId)
                 .orElseThrow(() -> new ResourceNotFoundException("Shift not found"));
 
+        if (!"PENDING_APPROVAL".equalsIgnoreCase(shift.getStatus())) {
+            throw new BadRequestException("Only PENDING_APPROVAL shifts can be approved or rejected. Current status: " + shift.getStatus());
+        }
+
         boolean approve = "APPROVE".equalsIgnoreCase(request.getAction());
         if (approve) {
             shift.setStatus("OPEN");
@@ -842,36 +861,16 @@ public class AdminService {
 
             FacilityProfile facility = facilityProfileRepository.findById(shift.getFacilityId()).orElse(null);
             if (facility != null) {
-                Notification notif = Notification.builder()
+                notificationRepository.save(Notification.builder()
                         .userId(facility.getUserId())
                         .title("Locum Shift Approved & Live")
-                        .message("Your locum shift \"" + shift.getTitle() + "\" has been approved by compliance admin and is now open for claims.")
+                        .message("Your first locum shift \"" + shift.getTitle() + "\" has been approved by Compliance Admin and is now live. Future shifts will auto-publish immediately!")
                         .type("SHIFT")
-                        .actionUrl("/employer")
+                        .actionUrl("/employer/postings")
                         .read(false)
-                        .build();
-                notificationRepository.save(notif);
-            }
+                        .build());
 
-            // Urgent On-Call Shift Broadcast to local clinicians
-            if (facility != null && (shift.isUrgent() || (shift.getSurgeRatePerHour() != null && shift.getSurgeRatePerHour().compareTo(BigDecimal.ZERO) > 0))) {
-                String surgeInfo = shift.getSurgeLabel() != null && !shift.getSurgeLabel().isBlank()
-                        ? " (" + shift.getSurgeLabel() + " +₹" + shift.getSurgeRatePerHour() + "/hr surge)"
-                        : "";
-                List<CandidateProfile> localCandidates = candidateProfileRepository.findAll();
-                for (CandidateProfile cand : localCandidates) {
-                    if (cand.getCity() != null && cand.getCity().equalsIgnoreCase(facility.getCity())) {
-                        Notification urgentNotif = Notification.builder()
-                                .userId(cand.getUserId())
-                                .title("Urgent On-Call Shift: " + shift.getTitle())
-                                .message(facility.getHospitalName() + " posted an emergency duty: " + shift.getTitle() + surgeInfo + " in " + facility.getCity() + ". Guaranteed escrow payout.")
-                                .type("SHIFT_URGENT")
-                                .actionUrl("/shifts")
-                                .read(false)
-                                .build();
-                        notificationRepository.save(urgentNotif);
-                    }
-                }
+                shiftManagementService.notifyUrgentLocalClinicians(shift, facility);
             }
 
             auditLogService.logEvent(principal.getId(), "ADMIN_SHIFT_APPROVED", "LocumShift", shiftId.toString(), null);
@@ -882,10 +881,12 @@ public class AdminService {
             FacilityWallet wallet = facilityWalletRepository.findByFacilityIdWithLock(shift.getFacilityId()).orElse(null);
             if (wallet != null) {
                 BigDecimal effectiveHourlyRate = shift.getRatePerHour().add(shift.getSurgeRatePerHour());
-                BigDecimal totalEscrow = effectiveHourlyRate.multiply(BigDecimal.valueOf(shift.getHours()))
+                BigDecimal workerEscrow = effectiveHourlyRate.multiply(BigDecimal.valueOf(shift.getHours()))
                         .multiply(BigDecimal.valueOf(shift.getOpenings()));
+                BigDecimal totalEscrow = workerEscrow.add(shift.getFacilityFeeAmount() != null ? shift.getFacilityFeeAmount() : BigDecimal.ZERO);
 
-                wallet.setLockedEscrowBalance(wallet.getLockedEscrowBalance().subtract(totalEscrow));
+                BigDecimal safeSub = totalEscrow.min(wallet.getLockedEscrowBalance());
+                wallet.setLockedEscrowBalance(wallet.getLockedEscrowBalance().subtract(safeSub));
                 wallet.setAvailableBalance(wallet.getAvailableBalance().add(totalEscrow));
                 facilityWalletRepository.save(wallet);
 
@@ -905,15 +906,14 @@ public class AdminService {
 
             FacilityProfile facility = facilityProfileRepository.findById(shift.getFacilityId()).orElse(null);
             if (facility != null) {
-                Notification notif = Notification.builder()
+                notificationRepository.save(Notification.builder()
                         .userId(facility.getUserId())
                         .title("Locum Shift Rejected")
                         .message("Your locum shift \"" + shift.getTitle() + "\" was rejected: " + (request.getNotes() != null ? request.getNotes() : "Compliance mismatch") + ". Full escrow refunded.")
                         .type("SHIFT")
-                        .actionUrl("/employer")
+                        .actionUrl("/employer/wallet")
                         .read(false)
-                        .build();
-                notificationRepository.save(notif);
+                        .build());
             }
             auditLogService.logEvent(principal.getId(), "ADMIN_SHIFT_REJECTED", "LocumShift", shiftId.toString(), null);
         }
@@ -966,9 +966,213 @@ public class AdminService {
                 .collect(Collectors.toList());
     }
 
+    @Transactional(readOnly = true)
+    public List<ShiftClaimDto> getDisputedShiftClaims() {
+        return shiftClaimRepository.findByStatusOrderByClaimedAtDesc("DISPUTED").stream()
+                .map(c -> {
+                    LocumShift shift = locumShiftRepository.findById(c.getShiftId()).orElse(null);
+                    FacilityProfile facility = shift != null ? facilityProfileRepository.findById(shift.getFacilityId()).orElse(null) : null;
+                    CandidateProfile candidate = candidateProfileRepository.findById(c.getCandidateId()).orElse(null);
+                    return ShiftClaimDto.builder()
+                            .id(c.getId())
+                            .shiftId(c.getShiftId())
+                            .candidateId(c.getCandidateId())
+                            .candidateName(candidate != null ? candidate.getName() : "Candidate")
+                            .candidateRole(candidate != null ? candidate.getProfession() : "Clinical Practitioner")
+                            .facilityName(facility != null ? facility.getHospitalName() : "Partner Facility")
+                            .facilityCity(facility != null ? facility.getCity() : null)
+                            .shiftTitle(shift != null ? shift.getTitle() : "Locum Shift")
+                            .department(shift != null ? shift.getDepartment() : "General")
+                            .hours(shift != null ? shift.getHours() : 8)
+                            .actualHours(c.getActualHours())
+                            .startAt(shift != null ? shift.getStartAt() : null)
+                            .endAt(shift != null ? shift.getEndAt() : null)
+                            .grossAmountPaise(c.getGrossAmount().multiply(BigDecimal.valueOf(100)).longValue())
+                            .platformFeePaise(c.getPlatformFee().multiply(BigDecimal.valueOf(100)).longValue())
+                            .tdsAmountPaise(c.getTdsAmount().multiply(BigDecimal.valueOf(100)).longValue())
+                            .netAmountPaise(c.getNetAmount().multiply(BigDecimal.valueOf(100)).longValue())
+                            .status(c.getStatus())
+                            .payoutStatus(c.getPayoutStatus())
+                            .disputeReason(c.getDisputeReason())
+                            .disputedAt(c.getDisputedAt())
+                            .claimedAt(c.getClaimedAt())
+                            .build();
+                })
+                .collect(Collectors.toList());
+    }
+
+    @Transactional
+    public void resolveShiftDispute(CustomUserPrincipal principal, UUID claimId, ResolveDisputeRequest request) {
+        ShiftClaim claim = shiftClaimRepository.findByIdWithLock(claimId)
+                .orElseThrow(() -> new ResourceNotFoundException("Shift claim not found"));
+
+        if (!"DISPUTED".equalsIgnoreCase(claim.getStatus())) {
+            throw new BadRequestException("Shift claim is not in DISPUTED state. Current status: " + claim.getStatus());
+        }
+
+        LocumShift shift = locumShiftRepository.findByIdWithLock(claim.getShiftId())
+                .orElseThrow(() -> new ResourceNotFoundException("Shift not found"));
+        FacilityProfile facility = facilityProfileRepository.findById(shift.getFacilityId()).orElse(null);
+        CandidateProfile candidate = candidateProfileRepository.findById(claim.getCandidateId()).orElse(null);
+
+        String resolution = request.getResolution().trim().toUpperCase();
+        String adminNotes = request.getNotes() != null && !request.getNotes().isBlank()
+                ? request.getNotes().trim()
+                : "Resolved by Compliance Admin";
+
+        BigDecimal effectiveRate = shift.getRatePerHour().add(shift.getSurgeRatePerHour() != null ? shift.getSurgeRatePerHour() : BigDecimal.ZERO);
+        int scheduledHours = shift.getHours() > 0 ? shift.getHours() : 8;
+        BigDecimal facFeePct = shift.getFacilityFeePercent() != null ? shift.getFacilityFeePercent() : BigDecimal.ZERO;
+        BigDecimal scheduledGross = effectiveRate.multiply(BigDecimal.valueOf(scheduledHours));
+        BigDecimal scheduledFacFee = scheduledGross.multiply(facFeePct).divide(BigDecimal.valueOf(100), 2, java.math.RoundingMode.HALF_UP);
+
+        if ("REFUND_HOSPITAL".equals(resolution)) {
+            claim.setStatus("CANCELLED");
+            claim.setCancelledAt(Instant.now());
+            claim.setPayoutStatus("REFUNDED");
+            claim.setDisputeReason((claim.getDisputeReason() != null ? claim.getDisputeReason() + " | " : "") + "Admin Resolution: " + adminNotes);
+            shiftClaimRepository.save(claim);
+
+            BigDecimal refundTotal = scheduledGross.add(scheduledFacFee);
+            facilityWalletRepository.findByFacilityIdWithLock(shift.getFacilityId()).ifPresent(wallet -> {
+                BigDecimal safeSub = refundTotal.min(wallet.getLockedEscrowBalance());
+                wallet.setLockedEscrowBalance(wallet.getLockedEscrowBalance().subtract(safeSub));
+                wallet.setAvailableBalance(wallet.getAvailableBalance().add(refundTotal));
+                facilityWalletRepository.save(wallet);
+
+                walletTransactionRepository.save(WalletTransaction.builder()
+                        .walletId(wallet.getId())
+                        .type("refund")
+                        .amount(refundTotal)
+                        .balanceAfter(wallet.getAvailableBalance())
+                        .status("Refunded")
+                        .invoiceId("CRN-2026-" + UUID.randomUUID().toString().substring(0, 6).toUpperCase())
+                        .refNumber("DISP-REF-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase())
+                        .title("Dispute Refund: " + shift.getTitle())
+                        .subtitle(adminNotes)
+                        .build());
+            });
+        } else {
+            int approvedHrs = scheduledHours;
+            if ("PARTIAL_SPLIT".equals(resolution)) {
+                if (request.getApprovedHours() == null || request.getApprovedHours() < 1 || request.getApprovedHours() > scheduledHours) {
+                    throw new BadRequestException("For PARTIAL_SPLIT, approvedHours must be between 1 and " + scheduledHours);
+                }
+                approvedHrs = request.getApprovedHours();
+            } else if (!"RELEASE_TO_CANDIDATE".equals(resolution)) {
+                throw new BadRequestException("Unsupported resolution: " + resolution + ". Use RELEASE_TO_CANDIDATE, PARTIAL_SPLIT, or REFUND_HOSPITAL.");
+            }
+
+            BigDecimal approvedGross = effectiveRate.multiply(BigDecimal.valueOf(approvedHrs));
+            long priorCompleted = shiftClaimRepository.countCompletedClaimsExcluding(claim.getCandidateId(), claim.getId());
+            BigDecimal candFeePct = priorCompleted == 0 ? BigDecimal.ZERO : getPlatformSettingDecimal("PLATFORM_FEE_PERCENT", BigDecimal.valueOf(5.0));
+            BigDecimal tdsPct = getPlatformSettingDecimal("TDS_PERCENT", BigDecimal.valueOf(1.0));
+            BigDecimal candFee = approvedGross.multiply(candFeePct).divide(BigDecimal.valueOf(100), 2, java.math.RoundingMode.HALF_UP);
+            BigDecimal tds = approvedGross.multiply(tdsPct).divide(BigDecimal.valueOf(100), 2, java.math.RoundingMode.HALF_UP);
+            BigDecimal net = approvedGross.subtract(candFee).subtract(tds);
+
+            claim.setActualHours(approvedHrs);
+            claim.setPlatformFeePercent(candFeePct);
+            claim.setGrossAmount(approvedGross);
+            claim.setPlatformFee(candFee);
+            claim.setTdsAmount(tds);
+            claim.setNetAmount(net);
+            claim.setStatus("COMPLETED");
+            claim.setCompletedAt(Instant.now());
+            claim.setPayoutStatus("PENDING_DISBURSEMENT");
+            claim.setDisputeReason((claim.getDisputeReason() != null ? claim.getDisputeReason() + " | " : "") + "Admin Resolution: " + adminNotes);
+            shiftClaimRepository.save(claim);
+
+            if (candidate != null) {
+                candidate.setCompletedShiftsCount((candidate.getCompletedShiftsCount() != null ? candidate.getCompletedShiftsCount() : 0) + 1);
+                candidateProfileRepository.save(candidate);
+            }
+
+            BigDecimal approvedFacFee = approvedGross.multiply(facFeePct).divide(BigDecimal.valueOf(100), 2, java.math.RoundingMode.HALF_UP);
+
+            // Refund unused portion if partial split
+            if (approvedHrs < scheduledHours) {
+                BigDecimal refundDelta = scheduledGross.add(scheduledFacFee).subtract(approvedGross.add(approvedFacFee));
+                if (refundDelta.compareTo(BigDecimal.ZERO) > 0) {
+                    int finalApprovedHrs = approvedHrs;
+                    facilityWalletRepository.findByFacilityIdWithLock(shift.getFacilityId()).ifPresent(wallet -> {
+                        BigDecimal safeSub = refundDelta.min(wallet.getLockedEscrowBalance());
+                        wallet.setLockedEscrowBalance(wallet.getLockedEscrowBalance().subtract(safeSub));
+                        wallet.setAvailableBalance(wallet.getAvailableBalance().add(refundDelta));
+                        facilityWalletRepository.save(wallet);
+
+                        walletTransactionRepository.save(WalletTransaction.builder()
+                                .walletId(wallet.getId())
+                                .type("refund")
+                                .amount(refundDelta)
+                                .balanceAfter(wallet.getAvailableBalance())
+                                .status("Refunded")
+                                .invoiceId("CRN-2026-" + UUID.randomUUID().toString().substring(0, 6).toUpperCase())
+                                .refNumber("DISP-SPLIT-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase())
+                                .title("Partial Dispute Refund: " + shift.getTitle())
+                                .subtitle("Mediated settlement (" + finalApprovedHrs + "h approved vs " + scheduledHours + "h scheduled)")
+                                .build());
+                    });
+                }
+            }
+
+            // Record official hospital settlement invoice for approved dispute payout
+            BigDecimal settledTotal = approvedGross.add(approvedFacFee);
+            int finalSettledHrs = approvedHrs;
+            facilityWalletRepository.findByFacilityIdWithLock(shift.getFacilityId()).ifPresent(wallet -> {
+                walletTransactionRepository.save(WalletTransaction.builder()
+                        .walletId(wallet.getId())
+                        .type("disbursement")
+                        .amount(settledTotal.negate())
+                        .balanceAfter(wallet.getAvailableBalance())
+                        .status("Settled")
+                        .invoiceId("INV-2026-" + UUID.randomUUID().toString().substring(0, 6).toUpperCase())
+                        .refNumber("DISP-STL-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase())
+                        .title("Dispute Settlement: " + shift.getTitle())
+                        .subtitle(finalSettledHrs + "h approved duty • Clinician gross ₹" + approvedGross.toPlainString() + " + Facility fee ₹" + approvedFacFee.toPlainString())
+                        .build());
+            });
+        }
+
+        if (candidate != null) {
+            notificationRepository.save(Notification.builder()
+                    .userId(candidate.getUserId())
+                    .title("Dispute Resolved: " + shift.getTitle())
+                    .message("FALE Admin resolved your shift dispute (" + resolution + "): " + adminNotes)
+                    .type("SHIFT")
+                    .actionUrl("/shifts")
+                    .read(false)
+                    .build());
+        }
+        if (facility != null) {
+            notificationRepository.save(Notification.builder()
+                    .userId(facility.getUserId())
+                    .title("Dispute Resolved: " + shift.getTitle())
+                    .message("FALE Admin resolved shift dispute (" + resolution + "): " + adminNotes)
+                    .type("SHIFT")
+                    .actionUrl("/employer/wallet")
+                    .read(false)
+                    .build());
+        }
+
+        auditLogService.logEvent(principal.getId(), "ADMIN_SHIFT_DISPUTE_RESOLVED", "ShiftClaim", claimId.toString(), Map.of("resolution", resolution));
+    }
+
+    private BigDecimal getPlatformSettingDecimal(String key, BigDecimal fallback) {
+        return platformSettingRepository.findById(key)
+                .map(s -> {
+                    try {
+                        return new BigDecimal(s.getValue());
+                    } catch (Exception e) {
+                        return fallback;
+                    }
+                })
+                .orElse(fallback);
+    }
+
     @Transactional
     public void screenShiftClaim(CustomUserPrincipal principal, UUID claimId, AdminApplicationScreeningRequest request) {
-        ShiftClaim claim = shiftClaimRepository.findById(claimId)
+        ShiftClaim claim = shiftClaimRepository.findByIdWithLock(claimId)
                 .orElseThrow(() -> new ResourceNotFoundException("Shift claim not found"));
 
         LocumShift shift = locumShiftRepository.findByIdWithLock(claim.getShiftId())
@@ -979,35 +1183,38 @@ public class AdminService {
 
         boolean confirm = "SHORTLIST".equalsIgnoreCase(request.getAction()) || "APPROVE".equalsIgnoreCase(request.getAction());
         if (confirm) {
+            String pin = (claim.getCheckInPin() != null && !claim.getCheckInPin().isBlank())
+                    ? claim.getCheckInPin()
+                    : ShiftClaimService.generateCheckInPin();
             claim.setStatus("CONFIRMED");
+            claim.setCheckInPin(pin);
             shiftClaimRepository.save(claim);
 
             if (candidate != null) {
-                Notification notif = Notification.builder()
+                notificationRepository.save(Notification.builder()
                         .userId(candidate.getUserId())
                         .title("Shift Claim Confirmed by Admin")
-                        .message("Your claim for " + shift.getTitle() + " at " + (facility != null ? facility.getHospitalName() : "Hospital") + " has been confirmed. Payout guarantee held in escrow.")
+                        .message("Your claim for " + shift.getTitle() + " at " + (facility != null ? facility.getHospitalName() : "Hospital") + " is confirmed. Floor Check-In PIN: " + pin)
                         .type("SHIFT")
                         .actionUrl("/shifts")
                         .read(false)
-                        .build();
-                notificationRepository.save(notif);
+                        .build());
             }
             if (facility != null) {
-                Notification facNotif = Notification.builder()
+                notificationRepository.save(Notification.builder()
                         .userId(facility.getUserId())
                         .title("Clinician Confirmed for Shift")
                         .message("FALE Admin confirmed verified clinician " + (candidate != null ? candidate.getName() : "Candidate") + " for " + shift.getTitle() + ".")
                         .type("SHIFT")
                         .actionUrl("/employer/applicants")
                         .read(false)
-                        .build();
-                notificationRepository.save(facNotif);
+                        .build());
             }
             auditLogService.logEvent(principal.getId(), "ADMIN_SHIFT_CLAIM_CONFIRMED", "ShiftClaim", claimId.toString(), null);
         } else {
             claim.setStatus("REJECTED");
             claim.setPayoutStatus("REFUNDED");
+            claim.setCheckInPin(null);
             shiftClaimRepository.save(claim);
 
             shift.setSlotsClaimed(Math.max(0, shift.getSlotsClaimed() - 1));
@@ -1016,15 +1223,14 @@ public class AdminService {
 
             String reason = request.getNotes() != null ? request.getNotes() : "Ineligible for this shift";
             if (candidate != null) {
-                Notification notif = Notification.builder()
+                notificationRepository.save(Notification.builder()
                         .userId(candidate.getUserId())
                         .title("Shift Claim Not Approved")
                         .message("Your claim for " + shift.getTitle() + " could not be approved: " + reason)
                         .type("SHIFT")
                         .actionUrl("/shifts")
                         .read(false)
-                        .build();
-                notificationRepository.save(notif);
+                        .build());
             }
             auditLogService.logEvent(principal.getId(), "ADMIN_SHIFT_CLAIM_REJECTED", "ShiftClaim", claimId.toString(), null);
         }

@@ -63,7 +63,22 @@ public class LocumShift {
 
     @Builder.Default
     @Column(nullable = false, length = 30)
-    private String status = "OPEN"; // PENDING_APPROVAL, OPEN, FILLED, CANCELLED, REJECTED, COMPLETED
+    private String status = "OPEN"; // PENDING_APPROVAL, OPEN, FILLED, CANCELLED, REJECTED, COMPLETED, EXPIRED
+
+    @Column(columnDefinition = "TEXT")
+    private String description;
+
+    @Builder.Default
+    @Column(name = "facility_fee_percent", nullable = false, precision = 5, scale = 2)
+    private BigDecimal facilityFeePercent = BigDecimal.ZERO;
+
+    @Builder.Default
+    @Column(name = "facility_fee_amount", nullable = false, precision = 12, scale = 2)
+    private BigDecimal facilityFeeAmount = BigDecimal.ZERO;
+
+    @Builder.Default
+    @Column(name = "auto_approved", nullable = false)
+    private boolean autoApproved = false;
 
     @Version
     @Column(nullable = false)

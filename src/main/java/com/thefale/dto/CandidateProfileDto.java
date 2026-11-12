@@ -70,6 +70,10 @@ public class CandidateProfileDto {
     private String mentorStatus;
     private Instant verifiedAt;
     private Instant createdAt;
+    private Double shiftRatingAvg;
+    private Integer shiftRatingCount;
+    private Integer completedShiftsCount;
+    private Boolean topRated;
 
     // Associated sub-resources
     private List<CandidateDocumentDto> documents;

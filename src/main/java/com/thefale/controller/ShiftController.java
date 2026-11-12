@@ -1,6 +1,7 @@
 package com.thefale.controller;
 
 import com.thefale.dto.ApiResponse;
+import com.thefale.dto.FacilityShiftPolicyDto;
 import com.thefale.dto.LocumShiftDto;
 import com.thefale.dto.PostShiftRequest;
 import com.thefale.dto.ShiftClaimDto;
@@ -42,7 +43,29 @@ public class ShiftController {
             @AuthenticationPrincipal CustomUserPrincipal principal,
             @Valid @RequestBody PostShiftRequest request) {
         LocumShiftDto shift = shiftManagementService.postShift(principal, request);
-        return ResponseEntity.ok(ApiResponse.success("Locum shift broadcasted successfully with escrow hold", shift));
+        String msg = "OPEN".equalsIgnoreCase(shift.getStatus())
+                ? "Locum shift is live immediately with escrow hold"
+                : "First locum shift submitted for Compliance Admin review with escrow hold";
+        return ResponseEntity.ok(ApiResponse.success(msg, shift));
+    }
+
+    @GetMapping({"/api/v1/shifts/facility/policy", "/api/v1/facility/shifts/policy"})
+    @PreAuthorize("hasRole('FACILITY')")
+    @Operation(summary = "Get facility shift fee waiver and auto-approval policy")
+    public ResponseEntity<ApiResponse<FacilityShiftPolicyDto>> getFacilityShiftPolicy(
+            @AuthenticationPrincipal CustomUserPrincipal principal) {
+        return ResponseEntity.ok(ApiResponse.success(shiftManagementService.getFacilityShiftPolicy(principal)));
+    }
+
+    @PutMapping({"/api/v1/shifts/{id}", "/api/v1/facility/shifts/{id}"})
+    @PreAuthorize("hasRole('FACILITY')")
+    @Operation(summary = "Update a posted locum shift and reconcile escrow balance")
+    public ResponseEntity<ApiResponse<LocumShiftDto>> updateShift(
+            @AuthenticationPrincipal CustomUserPrincipal principal,
+            @PathVariable UUID id,
+            @Valid @RequestBody PostShiftRequest request) {
+        LocumShiftDto updated = shiftManagementService.updateShift(principal, id, request);
+        return ResponseEntity.ok(ApiResponse.success("Locum shift updated and escrow reconciled", updated));
     }
 
     @GetMapping({"/api/v1/shifts/facility", "/api/v1/facility/shifts"})

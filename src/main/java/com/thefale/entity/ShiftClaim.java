@@ -58,6 +58,38 @@ public class ShiftClaim {
     @Column(name = "actual_hours")
     private Integer actualHours;
 
+    @Column(name = "check_in_pin", length = 6)
+    private String checkInPin;
+
+    @Column(name = "dispute_reason", columnDefinition = "TEXT")
+    private String disputeReason;
+
+    @Column(name = "disputed_at")
+    private Instant disputedAt;
+
+    @Column(name = "disputed_by", length = 30)
+    private String disputedBy;
+
+    @Builder.Default
+    @Column(name = "platform_fee_percent", nullable = false, precision = 5, scale = 2)
+    private BigDecimal platformFeePercent = BigDecimal.valueOf(5.0);
+
+    @Column(name = "hospital_rating")
+    private Integer hospitalRating;
+
+    @Column(name = "hospital_review", columnDefinition = "TEXT")
+    private String hospitalReview;
+
+    @Column(name = "rating_tags", columnDefinition = "TEXT")
+    private String ratingTags;
+
+    @Column(name = "rated_at")
+    private Instant ratedAt;
+
+    @Version
+    @Column(nullable = false)
+    private Long version;
+
     @CreationTimestamp
     @Column(name = "claimed_at", nullable = false, updatable = false)
     private Instant claimedAt;

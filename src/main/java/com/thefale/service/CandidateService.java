@@ -306,6 +306,11 @@ public class CandidateService {
                 .isMentor(Boolean.TRUE.equals(profile.getIsMentor()))
                 .mentorStatus(profile.getMentorStatus() != null ? profile.getMentorStatus() : "NONE")
                 .verifiedAt(profile.getVerifiedAt())
+                .shiftRatingAvg(profile.getShiftRatingAvg() != null ? profile.getShiftRatingAvg().doubleValue() : 0.0)
+                .shiftRatingCount(profile.getShiftRatingCount() != null ? profile.getShiftRatingCount() : 0)
+                .completedShiftsCount(profile.getCompletedShiftsCount() != null ? profile.getCompletedShiftsCount() : 0)
+                .topRated(profile.getShiftRatingCount() != null && profile.getShiftRatingCount() >= 3
+                        && profile.getShiftRatingAvg() != null && profile.getShiftRatingAvg().compareTo(new java.math.BigDecimal("4.50")) >= 0)
                 .documents(documents)
                 .payoutMethod(payoutDto)
                 .activeUpgradeRequest(upgradeRequestDto)

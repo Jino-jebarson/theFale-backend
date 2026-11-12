@@ -159,7 +159,7 @@ public final class ClinicalMatchingEngine {
 
         String facilityCity = facility != null ? facility.getCity() : null;
 
-        return computeScore(
+        int baseScore = computeScore(
                 candidateCadre,
                 shiftCadre,
                 isStudent,
@@ -177,6 +177,16 @@ public final class ClinicalMatchingEngine {
                 null,
                 candidate.getKycStatus()
         );
+
+        // Verified hospital shift rating bonus for eligible clinicians (never penalizes 0-rating newcomers)
+        if (!isStudent && baseScore > 28
+                && candidate.getShiftRatingCount() != null && candidate.getShiftRatingCount() > 0
+                && candidate.getShiftRatingAvg() != null) {
+            double avg = candidate.getShiftRatingAvg().doubleValue();
+            int ratingBoost = avg >= 4.5 ? 3 : (avg >= 4.0 ? 2 : (avg >= 3.5 ? 1 : 0));
+            return Math.min(99, baseScore + ratingBoost);
+        }
+        return baseScore;
     }
 
     public static int calculateResdexMatch(CandidateProfile candidate, boolean isStudent, FacilityProfile facility, List<JobPosting> facilityOpenJobs) {

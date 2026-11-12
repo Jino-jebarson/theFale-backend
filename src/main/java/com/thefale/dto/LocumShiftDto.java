@@ -39,6 +39,18 @@ public class LocumShiftDto {
 
     private String status;
 
+    private String description;
+
+    private double facilityFeePercent;
+
+    private long facilityFeePaise;
+
+    private long totalEscrowRequiredPaise;
+
+    private boolean autoApproved;
+
     @JsonProperty("hasClaimed")
     private boolean hasClaimed;
+
+    private Integer matchScore;
 }

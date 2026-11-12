@@ -17,8 +17,17 @@ public interface LocumShiftRepository extends JpaRepository<LocumShift, UUID> {
 
     List<LocumShift> findByFacilityIdOrderByStartAtDesc(UUID facilityId);
 
-    @Query("SELECT s FROM LocumShift s WHERE s.status = 'OPEN' ORDER BY s.startAt ASC")
+    @Query("SELECT s FROM LocumShift s WHERE s.status = 'OPEN' AND s.endAt > CURRENT_TIMESTAMP ORDER BY s.startAt ASC")
     List<LocumShift> findOpenShifts();
+
+    @Query("SELECT s FROM LocumShift s WHERE s.status IN ('PENDING_APPROVAL', 'OPEN') AND s.endAt <= :now")
+    List<LocumShift> findExpiredUnfilledShifts(@Param("now") java.time.Instant now);
+
+    @Query("SELECT COUNT(s) FROM LocumShift s WHERE s.facilityId = :facilityId AND s.status IN ('OPEN', 'FILLED', 'BOOKED', 'COMPLETED', 'EXPIRED')")
+    long countApprovedShiftsByFacility(@Param("facilityId") UUID facilityId);
+
+    @Query("SELECT COUNT(s) FROM LocumShift s WHERE s.facilityId = :facilityId AND s.status NOT IN ('CANCELLED', 'REJECTED')")
+    long countValidFeeShiftsByFacility(@Param("facilityId") UUID facilityId);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT s FROM LocumShift s WHERE s.id = :id")

@@ -145,6 +145,18 @@ public class CandidateProfile {
     @Column(name = "verified_at")
     private Instant verifiedAt;
 
+    @Builder.Default
+    @Column(name = "shift_rating_avg", nullable = false, precision = 3, scale = 2)
+    private java.math.BigDecimal shiftRatingAvg = java.math.BigDecimal.ZERO;
+
+    @Builder.Default
+    @Column(name = "shift_rating_count", nullable = false)
+    private Integer shiftRatingCount = 0;
+
+    @Builder.Default
+    @Column(name = "completed_shifts_count", nullable = false)
+    private Integer completedShiftsCount = 0;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
