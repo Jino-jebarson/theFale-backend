@@ -78,7 +78,7 @@ public class FacilityWalletService {
         FacilityProfile facility = facilityService.getOrCreateFacilityProfile(principal);
 
         if (hospitalBankAccountRepository.findByFacilityId(facility.getId())
-                .filter(account -> "Verified".equalsIgnoreCase(account.getStatus())).isEmpty()) {
+                .filter(account -> "Verified".equalsIgnoreCase(account.getStatus()) && account.getVerifiedAt() != null).isEmpty()) {
             throw new BadRequestException("Hospital settlement bank account must be linked and verified before topping up escrow.");
         }
 
@@ -100,29 +100,25 @@ public class FacilityWalletService {
         BigDecimal depositAmount = BigDecimal.valueOf(request.getAmountPaise())
                 .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
 
-        BigDecimal newBalance = wallet.getAvailableBalance().add(depositAmount);
-        wallet.setAvailableBalance(newBalance);
-        facilityWalletRepository.save(wallet);
+        BigDecimal newBalance = wallet.getAvailableBalance(); // Funds remain unavailable until admin reconciles bank receipt.
 
         String refNumber = "TXN-TOPUP-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
-        String invoiceId = "INV-2026-" + (1000 + (int)(Math.random() * 9000));
 
         WalletTransaction tx = WalletTransaction.builder()
                 .walletId(wallet.getId())
                 .type("topup")
                 .amount(depositAmount)
                 .balanceAfter(newBalance)
-                .status("Completed")
+                .status("Pending Reconciliation")
                 .refNumber(refNumber)
                 .utr(utr)
                 .title("Escrow Deposit (" + request.getPaymentMethod().toUpperCase() + ")")
-                .subtitle("Verified banking top-up via UTR " + utr)
-                .invoiceId(invoiceId)
+                .subtitle("Bank receipt submitted for reconciliation. UTR " + utr)
                 .build();
 
         walletTransactionRepository.save(tx);
 
-        auditLogService.logEvent(principal.getId(), "WALLET_TOPPED_UP", "FacilityWallet", wallet.getId().toString(), null);
+        auditLogService.logEvent(principal.getId(), "DEPOSIT_SUBMITTED_FOR_RECONCILIATION", "FacilityWallet", wallet.getId().toString(), null);
 
         return mapWalletToDto(wallet);
     }
@@ -132,7 +128,7 @@ public class FacilityWalletService {
         FacilityProfile facility = facilityService.getOrCreateFacilityProfile(principal);
 
         if (hospitalBankAccountRepository.findByFacilityId(facility.getId())
-                .filter(account -> "Verified".equalsIgnoreCase(account.getStatus())).isEmpty()) {
+                .filter(account -> "Verified".equalsIgnoreCase(account.getStatus()) && account.getVerifiedAt() != null).isEmpty()) {
             throw new BadRequestException("Hospital settlement bank account must be linked and verified before purchasing sourcing credits.");
         }
 
@@ -167,9 +163,11 @@ public class FacilityWalletService {
         }
 
         if (request.getCredits() != null && request.getCredits() > 0) {
-            creditsToAdd = request.getCredits();
+            if (request.getCredits() != creditsToAdd) throw new BadRequestException("Credit quantity must match the selected package.");
         }
 
+        if (wallet.getAvailableBalance() == null || wallet.getAvailableBalance().compareTo(costRupees) < 0)
+            throw new BadRequestException("Insufficient available wallet balance. Reconcile a real deposit before purchasing credits.");
         BigDecimal newBalance = wallet.getAvailableBalance();
         boolean paidFromEscrow = false;
         if (wallet.getAvailableBalance() != null && wallet.getAvailableBalance().compareTo(costRupees) >= 0) {
@@ -182,7 +180,6 @@ public class FacilityWalletService {
         facilityWalletRepository.save(wallet);
 
         String refNumber = "CRD-FALE-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
-        String invoiceId = "INV-2026-" + (1000 + (int)(Math.random() * 9000));
 
         WalletTransaction tx = WalletTransaction.builder()
                 .walletId(wallet.getId())
@@ -195,7 +192,6 @@ public class FacilityWalletService {
                 .subtitle(paidFromEscrow
                         ? creditsToAdd + " verified candidate contact unlocks (Deducted from Escrow)"
                         : creditsToAdd + " verified candidate contact unlocks (Online Payment)")
-                .invoiceId(invoiceId)
                 .build();
 
         walletTransactionRepository.save(tx);
@@ -223,13 +219,17 @@ public class FacilityWalletService {
                 .walletId(t.getWalletId())
                 .type(t.getType())
                 .amountPaise(t.getAmount().multiply(BigDecimal.valueOf(100)).longValue())
+                .platformFeePaise(t.getPlatformFeeAmount() == null ? null : t.getPlatformFeeAmount().movePointRight(2).longValueExact())
+                .platformFeeGstPaise(t.getPlatformFeeGstAmount() == null ? null : t.getPlatformFeeGstAmount().movePointRight(2).longValueExact())
                 .balanceAfterPaise(t.getBalanceAfter().multiply(BigDecimal.valueOf(100)).longValue())
                 .status(t.getStatus())
                 .refNumber(t.getRefNumber())
                 .utr(t.getUtr())
                 .title(t.getTitle())
                 .subtitle(t.getSubtitle())
-                .invoiceId(t.getInvoiceId())
+                .invoiceId(t.getDocumentNumber() != null ? t.getDocumentNumber() : t.getInvoiceId())
+                .canonicalDocument(t.getDocumentNumber() != null).claimId(t.getClaimId()).reviewedAt(t.getReviewedAt()).reviewNotes(t.getReviewNotes())
+                .destinationSnapshot(t.getDestinationSnapshot()).bankDisbursedAt(t.getBankDisbursedAt())
                 .createdAt(t.getCreatedAt())
                 .build();
     }

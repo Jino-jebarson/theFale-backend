@@ -338,7 +338,7 @@ public class CandidateService {
             throw new BadRequestException("Method type must be 'upi' or 'bank'");
         }
 
-        CandidatePayoutMethod method = payoutMethodRepository.findByCandidateId(profile.getId())
+        CandidatePayoutMethod method = payoutMethodRepository.findByCandidateIdWithLock(profile.getId())
                 .orElse(CandidatePayoutMethod.builder().candidateId(profile.getId()).build());
 
         method.setMethodType(request.getMethodType().toLowerCase());
@@ -541,7 +541,7 @@ public class CandidateService {
                 .accountNumberLast4(method.getAccountNumberLast4())
                 .ifsc(method.getIfsc())
                 .accountHolderName(method.getAccountHolderName())
-                .status(method.getStatus())
+                .status("Verified".equalsIgnoreCase(method.getStatus()) && method.getVerifiedAt() == null ? "Pending" : method.getStatus())
                 .verifiedAt(method.getVerifiedAt())
                 .build();
     }

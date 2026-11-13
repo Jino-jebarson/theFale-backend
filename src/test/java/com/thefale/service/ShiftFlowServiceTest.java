@@ -55,6 +55,7 @@ class ShiftFlowServiceTest {
     @Mock private AuditEventRepository auditEventRepository;
     @Mock private JobApplicationRepository jobApplicationRepository;
     @Mock private CandidateDocumentRepository candidateDocumentRepository;
+    @Mock private CandidatePayoutMethodRepository candidatePayoutMethodRepository;
     @Mock private FacilityDocumentRepository facilityDocumentRepository;
     @Mock private HuddleService huddleService;
     @Mock private MentorApplicationRepository mentorApplicationRepository;
@@ -104,7 +105,8 @@ class ShiftFlowServiceTest {
                 platformSettingRepository,
                 notificationRepository,
                 userRepository,
-                auditLogService
+                auditLogService,
+                candidateDocumentRepository
         );
 
         adminService = new AdminService(
@@ -129,7 +131,8 @@ class ShiftFlowServiceTest {
                 huddleService,
                 mentorApplicationRepository,
                 shiftManagementService,
-                platformSettingRepository
+                platformSettingRepository,
+                candidatePayoutMethodRepository
         );
 
         facilityJobManagementService = new FacilityJobManagementService(
@@ -187,6 +190,7 @@ class ShiftFlowServiceTest {
                 .kycStatus("VERIFIED")
                 .build();
 
+        when(candidatePayoutMethodRepository.findByCandidateIdWithLock(any())).thenReturn(Optional.of(CandidatePayoutMethod.builder().methodType("bank").bankName("QA Bank").accountNumberLast4("0001").status("Verified").verifiedAt(Instant.now()).build()));
         facilityWallet = FacilityWallet.builder()
                 .id(UUID.randomUUID())
                 .facilityId(facilityId)
@@ -214,8 +218,8 @@ class ShiftFlowServiceTest {
     }
 
     @Test
-    void facilityFirstShiftRequiresApprovalWithZeroFee_secondShiftAutoLiveWithFivePercentFee() {
-        PostShiftRequest req = PostShiftRequest.builder()
+    void firstShiftNeedsApprovalAndBothPostsReserveEightPercent() {
+        PostShiftRequest req = PostShiftRequest.builder().details(testDetails())
                 .title("ICU Staff Nurse Night Duty")
                 .department("Critical Care")
                 .startAt(Instant.now().plus(2, ChronoUnit.DAYS))
@@ -233,9 +237,11 @@ class ShiftFlowServiceTest {
 
         assertThat(first.getStatus()).isEqualTo("PENDING_APPROVAL");
         assertThat(first.isAutoApproved()).isFalse();
-        assertThat(first.getFacilityFeePercent()).isEqualTo(0.0);
-        assertThat(first.getFacilityFeePaise()).isEqualTo(0L);
-        assertThat(facilityWallet.getLockedEscrowBalance()).isEqualByComparingTo("4000.00");
+        assertThat(first.getFacilityFeePercent()).isEqualTo(8.0);
+        assertThat(first.getFacilityFeePaise()).isEqualTo(32000L);
+        assertThat(first.getPlatformFeeGstPaise()).isEqualTo(5760L);
+        assertThat(first.getTotalEscrowRequiredPaise()).isEqualTo(437760L);
+        assertThat(facilityWallet.getLockedEscrowBalance()).isEqualByComparingTo("4377.60");
 
         // 2nd shift -> OPEN auto-live + 5% facility fee (Rs 200 on Rs 4000)
         when(locumShiftRepository.countValidFeeShiftsByFacility(facilityId)).thenReturn(1L);
@@ -246,9 +252,9 @@ class ShiftFlowServiceTest {
 
         assertThat(second.getStatus()).isEqualTo("OPEN");
         assertThat(second.isAutoApproved()).isTrue();
-        assertThat(second.getFacilityFeePercent()).isEqualTo(5.0);
-        assertThat(second.getFacilityFeePaise()).isEqualTo(20000L);
-        assertThat(facilityWallet.getLockedEscrowBalance()).isEqualByComparingTo("8200.00");
+        assertThat(second.getFacilityFeePercent()).isEqualTo(8.0);
+        assertThat(second.getFacilityFeePaise()).isEqualTo(32000L);
+        assertThat(facilityWallet.getLockedEscrowBalance()).isEqualByComparingTo("8755.20");
     }
 
     @Test
@@ -278,7 +284,7 @@ class ShiftFlowServiceTest {
         when(locumShiftRepository.findByIdWithLock(shiftId)).thenReturn(Optional.of(existing));
         when(shiftClaimRepository.findByShiftId(shiftId)).thenReturn(Collections.emptyList());
 
-        PostShiftRequest increaseOpenings = PostShiftRequest.builder()
+        PostShiftRequest increaseOpenings = PostShiftRequest.builder().details(testDetails())
                 .title("ICU Shift Updated")
                 .department("Critical Care")
                 .startAt(start)
@@ -296,7 +302,7 @@ class ShiftFlowServiceTest {
         when(shiftClaimRepository.findByShiftId(shiftId)).thenReturn(List.of(
                 ShiftClaim.builder().id(UUID.randomUUID()).shiftId(shiftId).status("CLAIMED").build()
         ));
-        PostShiftRequest dropRate = PostShiftRequest.builder()
+        PostShiftRequest dropRate = PostShiftRequest.builder().details(testDetails())
                 .title("ICU Shift Updated")
                 .department("Critical Care")
                 .startAt(start)
@@ -308,6 +314,40 @@ class ShiftFlowServiceTest {
         assertThatThrownBy(() -> shiftManagementService.updateShift(facilityPrincipal, shiftId, dropRate))
                 .isInstanceOf(BadRequestException.class)
                 .hasMessageContaining("Cannot reduce hourly rate");
+    }
+
+    @Test
+    void updatePersistsRequirementsAndArrivalDetailsWithoutReservingPendingApplications() {
+        LocumShift shift = candidateShift();
+        Instant start = Instant.now().plus(2, ChronoUnit.DAYS);
+        shift.setStartAt(start); shift.setEndAt(start.plus(8, ChronoUnit.HOURS));
+        ShiftDetails details = testDetails(); details.setProfession("Doctor"); details.setReportTo("Jino");
+        details.setReportLocation("ICU"); details.setDressRequirement("Own scrubs");
+        details.setItemsToBring("Council ID card"); details.setReportingNotes("Staff entrance");
+        PostShiftRequest request = PostShiftRequest.builder().title(shift.getTitle()).department(shift.getDepartment())
+                .startAt(shift.getStartAt()).endAt(shift.getEndAt()).ratePerHourPaise(100000L).openings(1).details(details).build();
+        when(shiftClaimRepository.findByShiftId(shift.getId())).thenReturn(List.of(
+                ShiftClaim.builder().status("CLAIMED").build()));
+
+        LocumShiftDto updated = shiftManagementService.updateShift(facilityPrincipal, shift.getId(), request);
+
+        assertThat(shift.getDetails()).isEqualTo(details);
+        assertThat(updated.getDetails().getProfession()).isEqualTo("Doctor");
+        assertThat(updated.getDetails().getReportTo()).isEqualTo("Jino");
+        assertThat(updated.getDetails().getReportingNotes()).isEqualTo("Staff entrance");
+        assertThat(updated.getSlotsClaimed()).isZero();
+        assertThat(updated.getStatus()).isEqualTo("OPEN");
+        assertThat(shiftManagementService.mapToDto(shift, verifiedFacility, false).getDetails().getReportTo()).isNull();
+
+        when(shiftClaimRepository.findByShiftId(shift.getId())).thenReturn(List.of(
+                ShiftClaim.builder().status("CONFIRMED").build()));
+        request.setDetails(testDetails());
+        assertThatThrownBy(() -> shiftManagementService.updateShift(facilityPrincipal, shift.getId(), request))
+                .isInstanceOf(BadRequestException.class).hasMessageContaining("Cannot change role");
+        assertThat(shift.getDetails().getProfession()).isEqualTo("Doctor");
+        request.setDetails(null);
+        assertThatThrownBy(() -> shiftManagementService.updateShift(facilityPrincipal, shift.getId(), request))
+                .isInstanceOf(BadRequestException.class).hasMessageContaining("required");
     }
 
     @Test
@@ -414,7 +454,7 @@ class ShiftFlowServiceTest {
     }
 
     @Test
-    void claimShiftAppliesZeroFeeOnFirstShiftAndFivePercentFromSecondShift() {
+    void cliniciansPayNoPlatformFeeOnAnyShift() {
         CandidateProfile candidate = CandidateProfile.builder()
                 .id(candidateId)
                 .userId(candidateUserId)
@@ -460,10 +500,10 @@ class ShiftFlowServiceTest {
         when(shiftClaimRepository.countValidFeeClaimsByCandidate(candidateId)).thenReturn(1L);
 
         ShiftClaimDto secondClaim = shiftClaimService.claimShift(candidatePrincipal, s2);
-        assertThat(secondClaim.getPlatformFeePercent()).isEqualTo(5.0);
-        assertThat(secondClaim.getPlatformFeePaise()).isEqualTo(40000L);
+        assertThat(secondClaim.getPlatformFeePercent()).isEqualTo(0.0);
+        assertThat(secondClaim.getPlatformFeePaise()).isEqualTo(0L);
         // Gross = 8000, 5% fee = 400, 1% TDS = 80 -> Net = 7520
-        assertThat(secondClaim.getNetAmountPaise()).isEqualTo(752000L);
+        assertThat(secondClaim.getNetAmountPaise()).isEqualTo(792000L);
     }
 
     @Test
@@ -499,7 +539,7 @@ class ShiftFlowServiceTest {
                 .shiftId(shiftId)
                 .candidateId(candidateId)
                 .status("CONFIRMED")
-                .checkInPin("4829")
+                .checkInPin("482901")
                 .grossAmount(new BigDecimal("4000.00"))
                 .platformFee(BigDecimal.ZERO)
                 .tdsAmount(new BigDecimal("40.00"))
@@ -514,12 +554,12 @@ class ShiftFlowServiceTest {
         when(candidateProfileRepository.findById(candidateId)).thenReturn(Optional.of(candidate));
 
         // Wrong PIN rejected
-        assertThatThrownBy(() -> shiftClaimService.checkIn(candidatePrincipal, claimId, new ShiftCheckInRequest("0000")))
+        assertThatThrownBy(() -> shiftClaimService.checkIn(candidatePrincipal, claimId, attendanceRequest("0000")))
                 .isInstanceOf(BadRequestException.class)
-                .hasMessageContaining("Invalid 4-digit");
+                .hasMessageContaining("Invalid six-digit");
 
         // Correct PIN transitions to CHECKED_IN
-        ShiftClaimDto checkedIn = shiftClaimService.checkIn(candidatePrincipal, claimId, new ShiftCheckInRequest("4829"));
+        ShiftClaimDto checkedIn = shiftClaimService.checkIn(candidatePrincipal, claimId, attendanceRequest("482901"));
         assertThat(checkedIn.getStatus()).isEqualTo("CHECKED_IN");
 
         // Compare baseline matching score before rating
@@ -605,11 +645,11 @@ class ShiftFlowServiceTest {
         assertThat(claim.getActualHours()).isEqualTo(6);
         // 6h * 1000 = 6000 gross; 5% fee = 300; 1% TDS = 60 -> net = 5640
         assertThat(claim.getGrossAmount()).isEqualByComparingTo("6000.00");
-        assertThat(claim.getPlatformFee()).isEqualByComparingTo("300.00");
-        assertThat(claim.getNetAmount()).isEqualByComparingTo("5640.00");
+        assertThat(claim.getPlatformFee()).isEqualByComparingTo("0.00");
+        assertThat(claim.getNetAmount()).isEqualByComparingTo("5940.00");
         // Hospital refund for 2 unused hrs: 2000 pay + 100 facility fee = 2100
-        assertThat(facilityWallet.getAvailableBalance()).isEqualByComparingTo(availBefore.add(new BigDecimal("2100.00")));
-        assertThat(facilityWallet.getLockedEscrowBalance()).isEqualByComparingTo("6300.00");
+        assertThat(facilityWallet.getAvailableBalance()).isEqualByComparingTo(availBefore.add(new BigDecimal("2400.00")));
+        assertThat(facilityWallet.getLockedEscrowBalance()).isEqualByComparingTo("6000.00");
     }
 
     @Test
@@ -746,4 +786,221 @@ class ShiftFlowServiceTest {
                 .singleElement()
                 .satisfies(s -> assertThat(s.isHasClaimed()).isFalse());
     }
+    private static com.thefale.entity.ShiftDetails testDetails() {
+        com.thefale.entity.ShiftDetails d = new com.thefale.entity.ShiftDetails();
+        d.setProfession("Nurse"); d.setCity("Bengaluru"); d.setReportTo("Duty supervisor"); d.setReportLocation("Reception");
+        return d;
+    }
+    private static ShiftCheckInRequest attendanceRequest(String pin) {
+        ShiftCheckInRequest request = new ShiftCheckInRequest();
+        request.setPin(pin); request.setMethod("PIN"); request.setLatitude(12.9); request.setLongitude(77.6); request.setAccuracy(10.0);
+        request.setLocationCapturedAt(Instant.now()); request.setSelfieCapturedAt(Instant.now());
+        try {
+            java.io.ByteArrayOutputStream image = new java.io.ByteArrayOutputStream();
+            javax.imageio.ImageIO.write(new java.awt.image.BufferedImage(160,160,java.awt.image.BufferedImage.TYPE_INT_RGB),"jpeg",image);
+            request.setSelfieDataUrl("data:image/jpeg;base64,"+java.util.Base64.getEncoder().encodeToString(image.toByteArray()));
+        } catch (Exception e) { throw new IllegalStateException(e); }
+        return request;
+    }
+
+    private LocumShift candidateShift() {
+        CandidateProfile candidate = CandidateProfile.builder().id(candidateId).userId(candidateUserId).name("QA Nurse")
+                .profession("Nurse").kycStatus("VERIFIED").experienceYears("3").skills("ICU").build();
+        when(candidateProfileRepository.findByUserId(candidateUserId)).thenReturn(Optional.of(candidate));
+        when(candidateProfileRepository.findById(candidateId)).thenReturn(Optional.of(candidate));
+        when(candidateProfileRepository.findByIdWithLock(candidateId)).thenReturn(Optional.of(candidate));
+        when(userRepository.findById(candidateUserId)).thenReturn(Optional.of(User.builder().id(candidateUserId).candidateLevel("PROFESSIONAL").build()));
+        when(facilityProfileRepository.findById(facilityId)).thenReturn(Optional.of(verifiedFacility));
+        when(facilityProfileRepository.findByUserId(facilityUserId)).thenReturn(Optional.of(verifiedFacility));
+        LocumShift shift = LocumShift.builder().id(UUID.randomUUID()).facilityId(facilityId).title("ICU Nurse").department("Critical Care")
+                .startAt(Instant.now().minusSeconds(600)).endAt(Instant.now().plusSeconds(28200)).hours(8)
+                .ratePerHour(new BigDecimal("1000")).openings(1).facilityFeePercent(new BigDecimal("8"))
+                .facilityFeeAmount(new BigDecimal("640")).status("OPEN").details(testDetails()).build();
+        when(locumShiftRepository.findByIdWithLock(shift.getId())).thenReturn(Optional.of(shift));
+        when(locumShiftRepository.findById(shift.getId())).thenReturn(Optional.of(shift));
+        return shift;
+    }
+
+    private ShiftClaim application(LocumShift shift) {
+        ShiftClaimDto applied = shiftClaimService.claimShift(candidatePrincipal, shift.getId());
+        ShiftClaim claim = ShiftClaim.builder().id(applied.getId()).shiftId(shift.getId()).candidateId(candidateId)
+                .status("CLAIMED").grossAmount(new BigDecimal("8000")).platformFee(BigDecimal.ZERO)
+                .tdsAmount(new BigDecimal("80")).netAmount(new BigDecimal("7920")).build();
+        when(shiftClaimRepository.findByIdWithLock(claim.getId())).thenReturn(Optional.of(claim));
+        when(shiftClaimRepository.findById(claim.getId())).thenReturn(Optional.of(claim));
+        when(shiftClaimRepository.findByShiftId(shift.getId())).thenReturn(List.of(claim));
+        return claim;
+    }
+
+    @Test
+    void applicationsDoNotReserveSlotsAndHospitalConfirmationIssuesPrivateCredentials() {
+        LocumShift shift = candidateShift(); ShiftClaim claim = application(shift);
+        assertThat(shift.getSlotsClaimed()).isZero(); assertThat(shift.getStatus()).isEqualTo("OPEN");
+        assertThat(shiftClaimService.mapClaimToDto(claim, shift, verifiedFacility).getArrivalInstructions()).isNull();
+        UpdateApplicationStatusRequest request = new UpdateApplicationStatusRequest(); request.setStatus("CONFIRMED");
+        JobApplicationDto confirmed = facilityJobManagementService.updateApplicationStatus(facilityPrincipal, claim.getId(), request);
+        assertThat(shift.getSlotsClaimed()).isEqualTo(1); assertThat(shift.getStatus()).isEqualTo("FILLED");
+        assertThat(confirmed.getCheckInPin()).matches("[0-9]{6}"); assertThat(confirmed.getCheckInQrToken()).isNotBlank();
+        ShiftClaimDto candidateView = shiftClaimService.mapClaimToDto(claim, shift, verifiedFacility);
+        assertThat(candidateView.getCheckInPin()).isNull(); assertThat(candidateView.getCheckInQrToken()).isNull();
+        assertThat(candidateView.getArrivalInstructions().getReportTo()).isEqualTo("Duty supervisor");
+        assertThatThrownBy(() -> facilityJobManagementService.updateApplicationStatus(facilityPrincipal, claim.getId(), request)).isInstanceOf(BadRequestException.class);
+    }
+
+    @Test
+    void checkInRequiresEvidenceAndSixDigitPinAndCannotBeReplayed() {
+        LocumShift shift = candidateShift(); ShiftClaim claim = application(shift); claim.setStatus("CONFIRMED"); claim.setCheckInPin("123456");
+        ShiftCheckInRequest request = attendanceRequest("123456"); request.setSelfieDataUrl(null);
+        assertThatThrownBy(() -> shiftClaimService.checkIn(candidatePrincipal, claim.getId(), request)).isInstanceOf(BadRequestException.class);
+        assertThat(claim.getStatus()).isEqualTo("CONFIRMED");
+        ShiftClaimDto checked = shiftClaimService.checkIn(candidatePrincipal, claim.getId(), attendanceRequest("123456"));
+        assertThat(checked.getStatus()).isEqualTo("CHECKED_IN"); assertThat(checked.isAttendanceRecorded()).isTrue();
+        assertThat(claim.getCheckInPin()).isNull();
+        assertThatThrownBy(() -> shiftClaimService.checkIn(candidatePrincipal, claim.getId(), attendanceRequest("123456"))).isInstanceOf(BadRequestException.class);
+    }
+
+    @Test
+    void qrCheckInUsesTheBookingTokenAndLimitsIncorrectAttempts() {
+        LocumShift shift = candidateShift(); ShiftClaim claim = application(shift); claim.setStatus("CONFIRMED"); claim.setCheckInQrToken("booking-token");
+        ShiftCheckInRequest wrong = attendanceRequest(""); wrong.setMethod("QR"); wrong.setQrToken("wrong-booking");
+        for (int attempt=0;attempt<5;attempt++) assertThatThrownBy(() -> shiftClaimService.checkIn(candidatePrincipal, claim.getId(), wrong)).isInstanceOf(BadRequestException.class);
+        assertThat(claim.getCheckInBlockedUntil()).isAfter(Instant.now());
+        ShiftCheckInRequest correct = attendanceRequest(""); correct.setMethod("QR"); correct.setQrToken("booking-token");
+        assertThatThrownBy(() -> shiftClaimService.checkIn(candidatePrincipal, claim.getId(), correct)).hasMessageContaining("five minutes");
+        claim.setCheckInBlockedUntil(Instant.now().minusSeconds(1));
+        assertThat(shiftClaimService.checkIn(candidatePrincipal, claim.getId(), correct).getStatus()).isEqualTo("CHECKED_IN");
+        assertThat(claim.getCheckInQrToken()).isNull();
+    }
+
+    @Test
+    void firstCompletedHospitalShiftRefundsReservedFeeAndNextShiftChargesEightPercent() {
+        LocumShift first = candidateShift(); ShiftClaim claim = application(first);
+        facilityWallet.setLockedEscrowBalance(new BigDecimal("8640"));
+        claim.setStatus("TIMESHEET_SUBMITTED");
+        shiftClaimService.completeShift(facilityPrincipal, claim.getId(), new CompleteShiftRequest());
+        assertThat(claim.getHospitalFeeAmount()).isEqualByComparingTo("0");
+        assertThat(claim.getPlatformFee()).isEqualByComparingTo("0");
+        assertThat(facilityWallet.getFirstCompletedShiftId()).isEqualTo(first.getId());
+        assertThat(facilityWallet.getAvailableBalance()).isEqualByComparingTo("100640");
+        assertThat(facilityWallet.getLockedEscrowBalance()).isEqualByComparingTo("8000");
+        LocumShift second = candidateShift(); ShiftClaim secondClaim = application(second); secondClaim.setStatus("TIMESHEET_SUBMITTED");
+        facilityWallet.setLockedEscrowBalance(facilityWallet.getLockedEscrowBalance().add(new BigDecimal("8640")));
+        shiftClaimService.completeShift(facilityPrincipal, secondClaim.getId(), new CompleteShiftRequest());
+        assertThat(secondClaim.getHospitalFeeAmount()).isEqualByComparingTo("640");
+        assertThat(secondClaim.getPlatformFee()).isEqualByComparingTo("0");
+        assertThat(facilityWallet.getAvailableBalance()).isEqualByComparingTo("100640");
+    }
+
+    @Test
+    void hospitalCannotCompleteAConfirmedDutyWithoutClinicianTimesheet() {
+        LocumShift shift = candidateShift(); ShiftClaim claim = application(shift); claim.setStatus("CONFIRMED");
+        assertThatThrownBy(() -> shiftClaimService.completeShift(facilityPrincipal, claim.getId())).isInstanceOf(BadRequestException.class);
+        assertThat(facilityWallet.getFirstCompletedShiftId()).isNull();
+    }
+
+    @Test
+    void requirementsBlockMissingVerifiedCertificatesAndExperience() {
+        LocumShift shift = candidateShift(); shift.getDetails().setBlsRequired(true);
+        assertThatThrownBy(() -> application(shift)).hasMessageContaining("BLS");
+        when(candidateDocumentRepository.findByCandidateId(candidateId)).thenReturn(List.of(CandidateDocument.builder().documentType("BLS").verified(true).build()));
+        shift.getDetails().setMinimumExperienceYears(5);
+        assertThatThrownBy(() -> application(shift)).hasMessageContaining("5 years");
+        shift.getDetails().setMinimumExperienceYears(2);
+        assertThat(application(shift).getStatus()).isEqualTo("CLAIMED");
+    }
+    @Test
+    void gstWaiverAndLaterDisbursementUseSavedTaxAmounts() {
+        LocumShift first = candidateShift(); first.setPlatformFeeGstPercent(ShiftCharges.GST_PERCENT); first.setPlatformFeeGstAmount(new BigDecimal("115.20"));
+        ShiftClaim free = application(first); free.setStatus("TIMESHEET_SUBMITTED");
+        facilityWallet.setLockedEscrowBalance(new BigDecimal("8755.20"));
+        shiftClaimService.completeShift(facilityPrincipal, free.getId());
+        assertThat(free.getHospitalFeeGstAmount()).isEqualByComparingTo("0");
+        assertThat(facilityWallet.getAvailableBalance()).isEqualByComparingTo("100755.20");
+        assertThat(facilityWallet.getLockedEscrowBalance()).isEqualByComparingTo("8000");
+        LocumShift second = candidateShift(); second.setPlatformFeeGstPercent(ShiftCharges.GST_PERCENT); second.setPlatformFeeGstAmount(new BigDecimal("115.20"));
+        ShiftClaim paid = application(second); paid.setStatus("TIMESHEET_SUBMITTED");
+        facilityWallet.setLockedEscrowBalance(new BigDecimal("16755.20"));
+        shiftClaimService.completeShift(facilityPrincipal, paid.getId());
+        assertThat(paid.getHospitalFeeAmount()).isEqualByComparingTo("640");
+        assertThat(paid.getHospitalFeeGstAmount()).isEqualByComparingTo("115.20");
+        assertThat(paid.getNetAmount()).isEqualByComparingTo("7920");
+        adminService.disbursePayout(adminPrincipal, paid.getId(), AdminPayoutApprovalRequest.builder().utr("GSTPAY123456").build());
+        assertThat(facilityWallet.getLockedEscrowBalance()).isEqualByComparingTo("8000");
+        assertThat(facilityWallet.getTotalDisbursed()).isEqualByComparingTo("8755.20");
+    }
+    @Test
+    void gstEditingAndCancellationRefundTheFullReservation() {
+        LocumShift shift = candidateShift(); shift.setOpenings(2); shift.setFacilityFeeAmount(new BigDecimal("1280"));
+        shift.setPlatformFeeGstPercent(ShiftCharges.GST_PERCENT); shift.setPlatformFeeGstAmount(new BigDecimal("230.40"));
+        shift.setStartAt(Instant.now().plus(2, ChronoUnit.DAYS)); shift.setEndAt(shift.getStartAt().plus(8, ChronoUnit.HOURS));
+        facilityWallet.setLockedEscrowBalance(new BigDecimal("17510.40"));
+        PostShiftRequest request = PostShiftRequest.builder().title(shift.getTitle()).department(shift.getDepartment()).details(testDetails())
+                .startAt(shift.getStartAt()).endAt(shift.getEndAt()).ratePerHourPaise(100000L).openings(1).build();
+        LocumShiftDto result = shiftManagementService.updateShift(facilityPrincipal, shift.getId(), request);
+        assertThat(result.getPlatformFeeGstPaise()).isEqualTo(11520L);
+        assertThat(facilityWallet.getLockedEscrowBalance()).isEqualByComparingTo("8755.20");
+        shiftManagementService.cancelShift(facilityPrincipal, shift.getId());
+        assertThat(facilityWallet.getLockedEscrowBalance()).isEqualByComparingTo("0");
+        assertThat(facilityWallet.getAvailableBalance()).isEqualByComparingTo("117510.40");
+    }
+    @Test
+    void gstPartialDisputeRefundAndSnapshotMatchApprovedHours() {
+        LocumShift shift = candidateShift(); shift.setPlatformFeeGstPercent(ShiftCharges.GST_PERCENT); shift.setPlatformFeeGstAmount(new BigDecimal("115.20"));
+        ShiftClaim claim = application(shift); claim.setStatus("DISPUTED");
+        facilityWallet.setFirstCompletedShiftId(UUID.randomUUID()); facilityWallet.setLockedEscrowBalance(new BigDecimal("8755.20"));
+        adminService.resolveShiftDispute(adminPrincipal, claim.getId(), ResolveDisputeRequest.builder().resolution("PARTIAL_SPLIT").approvedHours(6).build());
+        assertThat(claim.getHospitalFeeAmount()).isEqualByComparingTo("480");
+        assertThat(claim.getHospitalFeeGstAmount()).isEqualByComparingTo("86.40");
+        assertThat(facilityWallet.getLockedEscrowBalance()).isEqualByComparingTo("6566.40");
+        assertThat(facilityWallet.getAvailableBalance()).isEqualByComparingTo("102188.80");
+    }
+    @Test
+    void gstIsRefundedWhenAdminRejectsAFirstPosting() {
+        LocumShift shift = candidateShift(); shift.setStatus("PENDING_APPROVAL");
+        shift.setPlatformFeeGstPercent(ShiftCharges.GST_PERCENT); shift.setPlatformFeeGstAmount(new BigDecimal("115.20"));
+        facilityWallet.setLockedEscrowBalance(new BigDecimal("8755.20"));
+        adminService.reviewShift(adminPrincipal, shift.getId(), AdminKycReviewRequest.builder().action("REJECT").notes("QA").build());
+        assertThat(facilityWallet.getLockedEscrowBalance()).isEqualByComparingTo("0");
+        assertThat(facilityWallet.getAvailableBalance()).isEqualByComparingTo("108755.20");
+    }
+
+    @Test
+    void actualHoursReconcileGstForShortDutyAndOvertime() {
+        for (int hours : new int[] {6, 10}) {
+            LocumShift shift = candidateShift(); shift.setPlatformFeeGstPercent(ShiftCharges.GST_PERCENT); shift.setPlatformFeeGstAmount(new BigDecimal("115.20"));
+            ShiftClaim claim = application(shift); claim.setStatus("TIMESHEET_SUBMITTED");
+            facilityWallet.setFirstCompletedShiftId(UUID.randomUUID());
+            facilityWallet.setAvailableBalance(new BigDecimal("100000")); facilityWallet.setLockedEscrowBalance(new BigDecimal("8755.20"));
+            CompleteShiftRequest request = new CompleteShiftRequest(); request.setActualHours(hours);
+            shiftClaimService.completeShift(facilityPrincipal, claim.getId(), request);
+            assertThat(claim.getHospitalFeeGstAmount()).isEqualByComparingTo(hours == 6 ? "86.40" : "144.00");
+            assertThat(facilityWallet.getLockedEscrowBalance()).isEqualByComparingTo(hours == 6 ? "6566.40" : "10944.00");
+            assertThat(facilityWallet.getAvailableBalance()).isEqualByComparingTo(hours == 6 ? "102188.80" : "97811.20");
+        }
+    }
+    @Test
+    void fullDisputeRefundIncludesGstAndCannotPublishAnUnfundedOpening() {
+        LocumShift shift = candidateShift(); shift.setPlatformFeeGstPercent(ShiftCharges.GST_PERCENT); shift.setPlatformFeeGstAmount(new BigDecimal("115.20"));
+        ShiftClaim claim = application(shift); claim.setStatus("DISPUTED");
+        shift.setSlotsClaimed(1);
+        facilityWallet.setLockedEscrowBalance(new BigDecimal("8755.20"));
+        adminService.resolveShiftDispute(adminPrincipal, claim.getId(), ResolveDisputeRequest.builder().resolution("REFUND_HOSPITAL").build());
+        assertThat(facilityWallet.getAvailableBalance()).isEqualByComparingTo("108755.20");
+        assertThat(facilityWallet.getLockedEscrowBalance()).isEqualByComparingTo("0");
+        assertThat(shift.getStatus()).isEqualTo("CANCELLED");
+        assertThat(shift.getPlatformFeeGstAmount()).isEqualByComparingTo("0");
+    }
+
+    @Test
+    void cannotRefundAnAlreadyDisbursedClaimFromOtherEscrowFunds() {
+        LocumShift shift = candidateShift(); ShiftClaim claim = application(shift);
+        claim.setStatus("DISPUTED"); claim.setPayoutStatus("DISBURSED");
+        facilityWallet.setLockedEscrowBalance(new BigDecimal("50000"));
+        assertThatThrownBy(() -> adminService.resolveShiftDispute(adminPrincipal, claim.getId(),
+                ResolveDisputeRequest.builder().resolution("REFUND_HOSPITAL").build()))
+                .isInstanceOf(BadRequestException.class).hasMessageContaining("already been disbursed");
+        assertThat(facilityWallet.getAvailableBalance()).isEqualByComparingTo("100000");
+        assertThat(facilityWallet.getLockedEscrowBalance()).isEqualByComparingTo("50000");
+    }
+
 }

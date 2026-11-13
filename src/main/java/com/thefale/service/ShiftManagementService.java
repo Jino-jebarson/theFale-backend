@@ -53,24 +53,25 @@ public class ShiftManagementService {
     @Transactional(readOnly = true)
     public FacilityShiftPolicyDto getFacilityShiftPolicy(CustomUserPrincipal principal) {
         FacilityProfile facility = facilityService.getOrCreateFacilityProfile(principal);
-        boolean hasBank = hospitalBankAccountRepository.findByFacilityId(facility.getId()).isPresent();
+        boolean hasBank = hospitalBankAccountRepository.findByFacilityId(facility.getId()).filter(a -> "Verified".equalsIgnoreCase(a.getStatus())).isPresent();
         boolean kycVerified = "VERIFIED".equalsIgnoreCase(facility.getKycStatus());
         long priorApproved = locumShiftRepository.countApprovedShiftsByFacility(facility.getId());
         long priorValidFee = locumShiftRepository.countValidFeeShiftsByFacility(facility.getId());
-        BigDecimal standardFee = getSettingAsDecimal("FACILITY_SHIFT_FEE_PERCENT", BigDecimal.valueOf(5.0));
+        BigDecimal standardFee = BigDecimal.valueOf(8.0);
         long availPaise = facilityWalletRepository.findByFacilityId(facility.getId())
                 .map(w -> w.getAvailableBalance().multiply(BigDecimal.valueOf(100)).longValue())
                 .orElse(0L);
 
-        boolean firstShiftApprovalRequired = priorApproved == 0 || !kycVerified;
-        boolean firstShiftFeeWaived = priorValidFee == 0;
+        boolean firstShiftApprovalRequired = !facility.isFirstShiftApproved() && priorApproved == 0;
+        boolean firstShiftFeeWaived = facilityWalletRepository.findByFacilityId(facility.getId()).map(w -> w.getFirstCompletedShiftId() == null).orElse(true);
 
         return FacilityShiftPolicyDto.builder()
                 .hasLinkedBank(hasBank)
                 .kycVerified(kycVerified)
                 .firstShiftApprovalRequired(firstShiftApprovalRequired)
                 .firstShiftFeeWaived(firstShiftFeeWaived)
-                .platformFeePercent(firstShiftFeeWaived ? 0.0 : standardFee.doubleValue())
+                .platformFeePercent(standardFee.doubleValue())
+                .platformFeeGstPercent(ShiftCharges.GST_PERCENT.doubleValue())
                 .priorApprovedShiftsCount(priorApproved)
                 .priorValidShiftsCount(priorValidFee)
                 .availableBalancePaise(availPaise)
@@ -80,11 +81,13 @@ public class ShiftManagementService {
     @Transactional
     public LocumShiftDto postShift(CustomUserPrincipal principal, PostShiftRequest request) {
         FacilityProfile facility = facilityService.getOrCreateFacilityProfile(principal);
+        if (!"VERIFIED".equalsIgnoreCase(facility.getKycStatus())) throw new BadRequestException("Hospital verification is required before posting shifts.");
 
-        if (hospitalBankAccountRepository.findByFacilityId(facility.getId()).isEmpty()) {
+        if (hospitalBankAccountRepository.findByFacilityId(facility.getId()).filter(a -> "Verified".equalsIgnoreCase(a.getStatus())).isEmpty()) {
             throw new BadRequestException("Hospital settlement bank account must be linked and verified before broadcasting locum shifts (required for escrow custody and refunds).");
         }
 
+        ShiftRules.validateDetails(request.getDetails());
         validateShiftTimesAndFloor(request);
         int hours = resolveValidatedHours(request);
 
@@ -93,23 +96,23 @@ public class ShiftManagementService {
         BigDecimal surgeRateRupees = BigDecimal.valueOf(request.getSurgeRatePerHourPaise() != null ? request.getSurgeRatePerHourPaise() : 0L)
                 .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
 
-        // Facility fee: 0% on facility's 1st valid (non-cancelled/rejected) shift, 5% from 2nd+ shift onward
-        long priorValidFeeShifts = locumShiftRepository.countValidFeeShiftsByFacility(facility.getId());
-        BigDecimal standardFacilityFeePct = getSettingAsDecimal("FACILITY_SHIFT_FEE_PERCENT", BigDecimal.valueOf(5.0));
-        BigDecimal facilityFeePercent = priorValidFeeShifts == 0 ? BigDecimal.ZERO : standardFacilityFeePct;
+        // Reserve 8%; completion refunds the first completed shift's hospital fee.
+        BigDecimal standardFacilityFeePct = BigDecimal.valueOf(8.0);
+        BigDecimal facilityFeePercent = standardFacilityFeePct;
 
         BigDecimal totalPerWorker = baseRateRupees.add(surgeRateRupees).multiply(BigDecimal.valueOf(hours));
         BigDecimal workerEscrowTotal = totalPerWorker.multiply(BigDecimal.valueOf(request.getOpenings()));
-        BigDecimal facilityFeeAmount = workerEscrowTotal.multiply(facilityFeePercent)
-                .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
-        BigDecimal totalEscrowRequired = workerEscrowTotal.add(facilityFeeAmount);
+        BigDecimal feePerWorker = ShiftCharges.percent(totalPerWorker, facilityFeePercent);
+        BigDecimal facilityFeeAmount = feePerWorker.multiply(BigDecimal.valueOf(request.getOpenings()));
+        BigDecimal gstAmount = ShiftCharges.percent(feePerWorker, ShiftCharges.GST_PERCENT).multiply(BigDecimal.valueOf(request.getOpenings()));
+        BigDecimal totalEscrowRequired = workerEscrowTotal.add(facilityFeeAmount).add(gstAmount);
 
         FacilityWallet wallet = facilityWalletRepository.findByFacilityIdWithLock(facility.getId())
                 .orElseThrow(() -> new BadRequestException("Facility wallet not initialized. Please onboard and top up your escrow reserve."));
 
         if (wallet.getAvailableBalance().compareTo(totalEscrowRequired) < 0) {
             throw new BadRequestException("Insufficient escrow reserve. Required: ₹" + totalEscrowRequired +
-                    " (Shift Escrow ₹" + workerEscrowTotal + " + Platform Fee ₹" + facilityFeeAmount +
+                    " (Shift Escrow ₹" + workerEscrowTotal + " + Platform Fee ₹" + facilityFeeAmount + " + GST ₹" + gstAmount +
                     "), Available: ₹" + wallet.getAvailableBalance() + ". Please top up your wallet escrow reserve before broadcasting shifts.");
         }
 
@@ -125,6 +128,7 @@ public class ShiftManagementService {
                 .walletId(wallet.getId())
                 .type("escrow_hold")
                 .amount(totalEscrowRequired.negate())
+                .platformFeeAmount(facilityFeeAmount).platformFeeGstAmount(gstAmount)
                 .balanceAfter(wallet.getAvailableBalance())
                 .status("In Escrow")
                 .refNumber(escrowRef)
@@ -146,9 +150,8 @@ public class ShiftManagementService {
 
         // First-shift Admin gate: 1st shift (or unverified KYC facility) needs Admin approval;
         // 2nd+ shift goes OPEN immediately once bank, wage floor, and escrow checks pass.
-        boolean kycVerified = "VERIFIED".equalsIgnoreCase(facility.getKycStatus());
         long priorApprovedCount = locumShiftRepository.countApprovedShiftsByFacility(facility.getId());
-        boolean autoApprove = kycVerified && priorApprovedCount > 0;
+        boolean autoApprove = facility.isFirstShiftApproved() || priorApprovedCount > 0;
         String initialStatus = autoApprove ? "OPEN" : "PENDING_APPROVAL";
 
         LocumShift shift = LocumShift.builder()
@@ -168,9 +171,11 @@ public class ShiftManagementService {
                 .status(initialStatus)
                 .facilityFeePercent(facilityFeePercent)
                 .facilityFeeAmount(facilityFeeAmount)
+                .platformFeeGstPercent(ShiftCharges.GST_PERCENT).platformFeeGstAmount(gstAmount)
                 .autoApproved(autoApprove)
                 .build();
 
+        shift.setDetails(request.getDetails());
         LocumShift saved = locumShiftRepository.save(shift);
         auditLogService.logEvent(principal.getId(), autoApprove ? "SHIFT_POSTED_AUTO_LIVE" : "SHIFT_POSTED", "LocumShift", saved.getId().toString(), null);
 
@@ -178,7 +183,7 @@ public class ShiftManagementService {
             notifyUrgentLocalClinicians(saved, facility);
         }
 
-        return mapToDto(saved, facility, false);
+        return mapForFacility(saved, facility);
     }
 
     @Transactional
@@ -196,6 +201,7 @@ public class ShiftManagementService {
             throw new BadRequestException("Cannot update shift in status " + shift.getStatus());
         }
 
+        ShiftRules.validateDetails(request.getDetails());
         validateShiftTimesAndFloor(request);
         int newHours = resolveValidatedHours(request);
 
@@ -217,7 +223,10 @@ public class ShiftManagementService {
             if (!shift.getStartAt().equals(request.getStartAt()) || !shift.getEndAt().equals(request.getEndAt()) || shift.getHours() != newHours) {
                 throw new BadRequestException("Cannot alter shift dates or duration after clinicians have already claimed slots.");
             }
-            if (request.getOpenings() < activeClaims.size()) {
+            long confirmedSlots = activeClaims.stream().filter(ShiftRules::reservesSlot).count();
+            if (confirmedSlots > 0 && shift.getDetails() != null && !java.util.Objects.equals(shift.getDetails().publicRequirements(), request.getDetails().publicRequirements()))
+                throw new BadRequestException("Cannot change role, city or requirements after a clinician is confirmed.");
+            if (request.getOpenings() < confirmedSlots) {
                 throw new BadRequestException("Openings (" + request.getOpenings() + ") cannot be fewer than currently active claims (" + activeClaims.size() + ").");
             }
         }
@@ -226,15 +235,16 @@ public class ShiftManagementService {
         BigDecimal oldWorkerEscrow = shift.getRatePerHour().add(shift.getSurgeRatePerHour())
                 .multiply(BigDecimal.valueOf(shift.getHours()))
                 .multiply(BigDecimal.valueOf(shift.getOpenings()));
-        BigDecimal oldTotalEscrow = oldWorkerEscrow.add(shift.getFacilityFeeAmount() != null ? shift.getFacilityFeeAmount() : BigDecimal.ZERO);
+        BigDecimal oldTotalEscrow = oldWorkerEscrow.add(ShiftCharges.zero(shift.getFacilityFeeAmount())).add(ShiftCharges.reservedGst(shift));
 
         BigDecimal feePct = shift.getFacilityFeePercent() != null ? shift.getFacilityFeePercent() : BigDecimal.ZERO;
         BigDecimal newWorkerEscrow = newBaseRate.add(newSurgeRate)
                 .multiply(BigDecimal.valueOf(newHours))
                 .multiply(BigDecimal.valueOf(request.getOpenings()));
-        BigDecimal newFacilityFee = newWorkerEscrow.multiply(feePct)
-                .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
-        BigDecimal newTotalEscrow = newWorkerEscrow.add(newFacilityFee);
+        BigDecimal newFeePerWorker = ShiftCharges.percent(newBaseRate.add(newSurgeRate).multiply(BigDecimal.valueOf(newHours)), feePct);
+        BigDecimal newFacilityFee = newFeePerWorker.multiply(BigDecimal.valueOf(request.getOpenings()));
+        BigDecimal newGst = ShiftCharges.gst(newFeePerWorker, shift).multiply(BigDecimal.valueOf(request.getOpenings()));
+        BigDecimal newTotalEscrow = newWorkerEscrow.add(newFacilityFee).add(newGst);
 
         BigDecimal delta = newTotalEscrow.subtract(oldTotalEscrow);
         if (delta.compareTo(BigDecimal.ZERO) != 0) {
@@ -252,6 +262,8 @@ public class ShiftManagementService {
                         .walletId(wallet.getId())
                         .type("escrow_hold")
                         .amount(delta.negate())
+                        .platformFeeAmount(newFacilityFee.subtract(ShiftCharges.zero(shift.getFacilityFeeAmount())))
+                        .platformFeeGstAmount(newGst.subtract(ShiftCharges.reservedGst(shift)))
                         .balanceAfter(wallet.getAvailableBalance())
                         .status("In Escrow")
                         .refNumber("ESCROW-UPD-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase())
@@ -260,7 +272,8 @@ public class ShiftManagementService {
                         .build());
             } else {
                 BigDecimal refund = delta.abs();
-                BigDecimal safeSub = refund.min(wallet.getLockedEscrowBalance());
+                ShiftCharges.requireReserve(wallet, refund);
+                BigDecimal safeSub = refund;
                 wallet.setLockedEscrowBalance(wallet.getLockedEscrowBalance().subtract(safeSub));
                 wallet.setAvailableBalance(wallet.getAvailableBalance().add(refund));
                 facilityWalletRepository.save(wallet);
@@ -269,6 +282,8 @@ public class ShiftManagementService {
                         .walletId(wallet.getId())
                         .type("refund")
                         .amount(refund)
+                        .platformFeeAmount(ShiftCharges.zero(shift.getFacilityFeeAmount()).subtract(newFacilityFee))
+                        .platformFeeGstAmount(ShiftCharges.reservedGst(shift).subtract(newGst))
                         .balanceAfter(wallet.getAvailableBalance())
                         .status("Refunded")
                         .refNumber("REFUND-UPD-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase())
@@ -279,6 +294,7 @@ public class ShiftManagementService {
         }
 
         shift.setTitle(request.getTitle().trim());
+        shift.setDetails(request.getDetails());
         shift.setDepartment(request.getDepartment().trim());
         shift.setDescription(request.getDescription() != null ? request.getDescription().trim() : shift.getDescription());
         shift.setStartAt(request.getStartAt());
@@ -290,15 +306,17 @@ public class ShiftManagementService {
         shift.setOpenings(request.getOpenings());
         shift.setUrgent(request.isUrgent());
         shift.setFacilityFeeAmount(newFacilityFee);
-        shift.setSlotsClaimed(activeClaims.size());
+        shift.setPlatformFeeGstAmount(newGst);
+        int reservedSlots = (int) activeClaims.stream().filter(ShiftRules::reservesSlot).count();
+        shift.setSlotsClaimed(reservedSlots);
 
         if (!"PENDING_APPROVAL".equalsIgnoreCase(shift.getStatus())) {
-            shift.setStatus(activeClaims.size() >= request.getOpenings() ? "FILLED" : "OPEN");
+            shift.setStatus(reservedSlots >= request.getOpenings() ? "FILLED" : "OPEN");
         }
 
         LocumShift saved = locumShiftRepository.save(shift);
         auditLogService.logEvent(principal.getId(), "SHIFT_UPDATED", "LocumShift", saved.getId().toString(), null);
-        return mapToDto(saved, facility, false);
+        return mapForFacility(saved, facility);
     }
 
     @Transactional(readOnly = true)
@@ -364,7 +382,7 @@ public class ShiftManagementService {
         FacilityProfile facility = facilityService.getOrCreateFacilityProfile(principal);
 
         return locumShiftRepository.findByFacilityIdOrderByStartAtDesc(facility.getId()).stream()
-                .map(s -> mapToDto(s, facility, false))
+                .map(s -> mapForFacility(s, facility))
                 .collect(Collectors.toList());
     }
 
@@ -420,12 +438,13 @@ public class ShiftManagementService {
         BigDecimal workerEscrow = shift.getRatePerHour().add(shift.getSurgeRatePerHour())
                 .multiply(BigDecimal.valueOf(shift.getHours()))
                 .multiply(BigDecimal.valueOf(shift.getOpenings()));
-        BigDecimal refundAmount = workerEscrow.add(shift.getFacilityFeeAmount() != null ? shift.getFacilityFeeAmount() : BigDecimal.ZERO);
+        BigDecimal refundAmount = workerEscrow.add(ShiftCharges.zero(shift.getFacilityFeeAmount())).add(ShiftCharges.reservedGst(shift));
 
         FacilityWallet wallet = facilityWalletRepository.findByFacilityIdWithLock(facility.getId())
                 .orElseThrow(() -> new ResourceNotFoundException("Facility wallet not found"));
 
-        BigDecimal safeLockedSub = refundAmount.min(wallet.getLockedEscrowBalance());
+        ShiftCharges.requireReserve(wallet, refundAmount);
+        BigDecimal safeLockedSub = refundAmount;
         wallet.setLockedEscrowBalance(wallet.getLockedEscrowBalance().subtract(safeLockedSub));
         wallet.setAvailableBalance(wallet.getAvailableBalance().add(refundAmount));
         facilityWalletRepository.save(wallet);
@@ -435,6 +454,7 @@ public class ShiftManagementService {
                 .walletId(wallet.getId())
                 .type("refund")
                 .amount(refundAmount)
+                        .platformFeeAmount(ShiftCharges.zero(shift.getFacilityFeeAmount())).platformFeeGstAmount(ShiftCharges.reservedGst(shift))
                 .balanceAfter(wallet.getAvailableBalance())
                 .status("Refunded")
                 .refNumber(refundRef)
@@ -479,10 +499,11 @@ public class ShiftManagementService {
                 BigDecimal workerEscrow = shift.getRatePerHour().add(shift.getSurgeRatePerHour())
                         .multiply(BigDecimal.valueOf(shift.getHours()))
                         .multiply(BigDecimal.valueOf(shift.getOpenings()));
-                BigDecimal refundAmount = workerEscrow.add(shift.getFacilityFeeAmount() != null ? shift.getFacilityFeeAmount() : BigDecimal.ZERO);
+                BigDecimal refundAmount = workerEscrow.add(ShiftCharges.zero(shift.getFacilityFeeAmount())).add(ShiftCharges.reservedGst(shift));
 
                 facilityWalletRepository.findByFacilityIdWithLock(shift.getFacilityId()).ifPresent(wallet -> {
-                    BigDecimal safeSub = refundAmount.min(wallet.getLockedEscrowBalance());
+                    ShiftCharges.requireReserve(wallet, refundAmount);
+                    BigDecimal safeSub = refundAmount;
                     wallet.setLockedEscrowBalance(wallet.getLockedEscrowBalance().subtract(safeSub));
                     wallet.setAvailableBalance(wallet.getAvailableBalance().add(refundAmount));
                     facilityWalletRepository.save(wallet);
@@ -491,6 +512,7 @@ public class ShiftManagementService {
                             .walletId(wallet.getId())
                             .type("refund")
                             .amount(refundAmount)
+                        .platformFeeAmount(ShiftCharges.zero(shift.getFacilityFeeAmount())).platformFeeGstAmount(ShiftCharges.reservedGst(shift))
                             .balanceAfter(wallet.getAvailableBalance())
                             .status("Refunded")
                             .refNumber("EXP-REF-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase())
@@ -594,6 +616,12 @@ public class ShiftManagementService {
                 .orElse(defaultValue);
     }
 
+    private LocumShiftDto mapForFacility(LocumShift shift, FacilityProfile facility) {
+        LocumShiftDto dto = mapToDto(shift, facility, false);
+        dto.setDetails(shift.getDetails());
+        return dto;
+    }
+
     public LocumShiftDto mapToDto(LocumShift s, FacilityProfile facility, boolean hasClaimed) {
         return mapToDto(s, facility, hasClaimed, null);
     }
@@ -605,13 +633,15 @@ public class ShiftManagementService {
         long facilityFeePaise = s.getFacilityFeeAmount() != null
                 ? s.getFacilityFeeAmount().multiply(BigDecimal.valueOf(100)).longValue()
                 : 0L;
-        long totalEscrowPaise = totalPayPaise * s.getOpenings() + facilityFeePaise;
+        long gstPaise = ShiftCharges.reservedGst(s).movePointRight(2).longValueExact();
+        long totalEscrowPaise = totalPayPaise * s.getOpenings() + facilityFeePaise + gstPaise;
 
         return LocumShiftDto.builder()
                 .id(s.getId())
                 .facilityId(s.getFacilityId())
                 .facilityName(facility != null ? facility.getHospitalName() : "Hospital")
-                .city(facility != null ? facility.getCity() : "City")
+                .city(s.getDetails() != null && s.getDetails().getCity() != null ? s.getDetails().getCity() : facility != null ? facility.getCity() : null)
+                .details(s.getDetails() != null ? s.getDetails().publicRequirements() : null)
                 .title(s.getTitle())
                 .department(s.getDepartment())
                 .description(s.getDescription())
@@ -628,6 +658,7 @@ public class ShiftManagementService {
                 .status(s.getStatus())
                 .facilityFeePercent(s.getFacilityFeePercent() != null ? s.getFacilityFeePercent().doubleValue() : 0.0)
                 .facilityFeePaise(facilityFeePaise)
+                .platformFeeGstPercent(ShiftCharges.zero(s.getPlatformFeeGstPercent()).doubleValue()).platformFeeGstPaise(gstPaise)
                 .totalEscrowRequiredPaise(totalEscrowPaise)
                 .autoApproved(s.isAutoApproved())
                 .hasClaimed(hasClaimed)

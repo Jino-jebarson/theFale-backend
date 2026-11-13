@@ -5,6 +5,7 @@ import com.thefale.dto.ApiError;
 import com.thefale.security.IdempotencyFilter;
 import com.thefale.security.JwtAuthenticationFilter;
 import com.thefale.security.RateLimitFilter;
+import jakarta.servlet.DispatcherType;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
@@ -72,6 +73,11 @@ public class SecurityConfig {
                 )
                 // Deny by default: Whitelist only public authentication and documentation endpoints
                 .authorizeHttpRequests(auth -> auth
+                        // The initial request has already passed JWT authentication.
+                        // SSE completion redispatches without rerunning the JWT filter;
+                        // rejecting it here truncates an already committed 200 response.
+                        .requestMatchers(request -> request.getDispatcherType() == DispatcherType.ASYNC
+                                && "/api/v1/ai/chat/stream".equals(request.getServletPath())).permitAll()
                         .requestMatchers(
                                 "/api/v1/auth/otp/send",
                                 "/api/v1/auth/otp/verify",

@@ -230,7 +230,7 @@ public class FacilityService {
         FacilityProfile facility = facilityProfileRepository.findByUserId(principal.getId())
                 .orElseThrow(() -> new ResourceNotFoundException("Facility profile not found"));
 
-        HospitalBankAccount account = hospitalBankAccountRepository.findByFacilityId(facility.getId())
+        HospitalBankAccount account = hospitalBankAccountRepository.findByFacilityIdWithLock(facility.getId())
                 .orElseGet(() -> HospitalBankAccount.builder()
                         .facilityId(facility.getId())
                         .build());
@@ -239,7 +239,7 @@ public class FacilityService {
         String last4 = rawAcc.length() >= 4 ? rawAcc.substring(rawAcc.length() - 4) : rawAcc;
 
         account.setBankName(request.getBankName().trim());
-        account.setAccountNumberEncrypted("ENC_" + rawAcc);
+        account.setAccountNumberEncrypted(rawAcc);
         account.setAccountNumberLast4(last4);
         account.setIfsc(request.getIfsc().trim().toUpperCase());
         account.setBranch(request.getBranch() != null ? request.getBranch().trim() : "Main Branch");
@@ -476,22 +476,17 @@ public class FacilityService {
     }
 
     private HospitalBankAccountDto mapBankToDto(HospitalBankAccount b) {
-        String fullAccount = b.getAccountNumberEncrypted();
-        if (fullAccount != null && fullAccount.startsWith("ENC_")) {
-            fullAccount = fullAccount.substring(4);
-        }
-
         return HospitalBankAccountDto.builder()
                 .id(b.getId())
                 .bankName(b.getBankName())
-                .accountNumber(fullAccount)
+                .accountNumber(null)
                 .accountNumberMasked("•••• •••• " + b.getAccountNumberLast4())
                 .accountNumberLast4(b.getAccountNumberLast4())
                 .ifsc(b.getIfsc())
                 .branch(b.getBranch())
                 .accountHolderName(b.getAccountHolderName())
                 .accountType(b.getAccountType())
-                .status(b.getStatus())
+                .status("Verified".equalsIgnoreCase(b.getStatus()) && b.getVerifiedAt() == null ? "Under Review" : b.getStatus())
                 .verifiedAt(b.getVerifiedAt())
                 .build();
     }

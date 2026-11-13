@@ -31,6 +31,9 @@ public class ShiftClaimDto {
     private String payoutStatus;
     private String utr;
     private String payoutSlipRef;
+    private Instant disbursedAt;
+    private String payoutMethodSnapshot;
+    private String payoutRegistrationNumber;
     private Instant claimedAt;
     private Instant checkedInAt;
     private Instant completedAt;
@@ -47,6 +50,10 @@ public class ShiftClaimDto {
     private double platformFeePercent;
     private boolean firstShiftFree;
     private String checkInPin;
+    private String checkInQrToken;
+    private com.thefale.entity.ShiftDetails arrivalInstructions;
+    private String checkInMethod;
+    private boolean attendanceRecorded;
     private String disputeReason;
     private Instant disputedAt;
     private Integer hospitalRating;

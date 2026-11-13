@@ -87,6 +87,13 @@ public class ShiftController {
         return ResponseEntity.ok(ApiResponse.success("Shift cancelled and escrow refunded to available balance"));
     }
 
+    @GetMapping("/api/v1/shifts/claims/{id}/attendance")
+    public ResponseEntity<ApiResponse<java.util.Map<String, Object>>> attendance(
+            @AuthenticationPrincipal CustomUserPrincipal principal, @PathVariable UUID id) {
+        return ResponseEntity.ok().cacheControl(org.springframework.http.CacheControl.noStore())
+                .body(ApiResponse.success(shiftClaimService.attendance(principal, id)));
+    }
+
     @PostMapping("/api/v1/shifts/{id}/claim")
     @PreAuthorize("hasRole('CANDIDATE')")
     @Operation(summary = "Claim a locum shift duty slot (Strictly barred for healthcare students)")

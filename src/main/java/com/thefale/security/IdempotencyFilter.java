@@ -33,6 +33,8 @@ public class IdempotencyFilter extends OncePerRequestFilter {
 
     private static final Set<String> IDEMPOTENT_ENDPOINTS = Set.of(
             "/api/v1/employer/shifts",
+            "/api/v1/shifts",
+            "/api/v1/facility/shifts",
             "/api/v1/employer/wallet/topup",
             "/api/v1/employer/credits/purchase"
     );

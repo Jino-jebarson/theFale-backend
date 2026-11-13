@@ -15,6 +15,7 @@ public class FacilityShiftPolicyDto {
     private boolean firstShiftApprovalRequired;
     private boolean firstShiftFeeWaived;
     private double platformFeePercent;
+    private double platformFeeGstPercent;
     private long priorApprovedShiftsCount;
     private long priorValidShiftsCount;
     private long availableBalancePaise;

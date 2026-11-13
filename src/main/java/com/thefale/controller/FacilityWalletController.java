@@ -47,7 +47,7 @@ public class FacilityWalletController {
             @AuthenticationPrincipal CustomUserPrincipal principal,
             @Valid @RequestBody WalletTopUpRequest request) {
         FacilityWalletDto wallet = facilityWalletService.topUp(principal, request);
-        return ResponseEntity.ok(ApiResponse.success("Deposit processed successfully into Escrow Reserve", wallet));
+        return ResponseEntity.ok(ApiResponse.success("Deposit submitted for reconciliation. Balance is unchanged until admin approval.", wallet));
     }
 
     @PostMapping({"/buy-credits", "/credits/purchase"})

@@ -28,6 +28,7 @@ public class HospitalBankAccount {
     private String bankName;
 
     @Column(name = "account_number_encrypted", nullable = false, length = 255)
+    @Convert(converter = com.thefale.security.BankAccountConverter.class)
     private String accountNumberEncrypted;
 
     @Column(name = "account_number_last4", nullable = false, length = 4)

@@ -55,6 +55,10 @@ public class ShiftClaim {
     @Column(name = "payout_slip_ref", length = 50)
     private String payoutSlipRef;
 
+    @Column(name = "payout_method_snapshot", length = 255) private String payoutMethodSnapshot;
+    @Column(name = "payout_candidate_name", length = 100) private String payoutCandidateName;
+    @Column(name = "payout_registration_number", length = 100) private String payoutRegistrationNumber;
+
     @Column(name = "actual_hours")
     private Integer actualHours;
 
@@ -72,7 +76,7 @@ public class ShiftClaim {
 
     @Builder.Default
     @Column(name = "platform_fee_percent", nullable = false, precision = 5, scale = 2)
-    private BigDecimal platformFeePercent = BigDecimal.valueOf(5.0);
+    private BigDecimal platformFeePercent = BigDecimal.ZERO;
 
     @Column(name = "hospital_rating")
     private Integer hospitalRating;
@@ -85,6 +89,24 @@ public class ShiftClaim {
 
     @Column(name = "rated_at")
     private Instant ratedAt;
+
+    private Double checkInLatitude;
+    private Double checkInLongitude;
+    private Double checkInAccuracy;
+    private Instant locationCapturedAt;
+    private Instant selfieCapturedAt;
+    @Column(columnDefinition = "TEXT")
+    private String checkInSelfie;
+    private String checkInMethod;
+    @Column(length = 64)
+    private String checkInQrToken;
+    private int checkInFailedAttempts;
+    private Instant checkInBlockedUntil;
+    @Column(precision = 12, scale = 2)
+    private BigDecimal hospitalFeeAmount;
+
+    @Column(name = "hospital_fee_gst_amount", precision = 12, scale = 2)
+    private BigDecimal hospitalFeeGstAmount;
 
     @Version
     @Column(nullable = false)

@@ -77,8 +77,20 @@ public class LocumShift {
     private BigDecimal facilityFeeAmount = BigDecimal.ZERO;
 
     @Builder.Default
+    @Column(name = "platform_fee_gst_percent", nullable = false, precision = 5, scale = 2)
+    private BigDecimal platformFeeGstPercent = BigDecimal.ZERO;
+
+    @Builder.Default
+    @Column(name = "platform_fee_gst_amount", nullable = false, precision = 12, scale = 2)
+    private BigDecimal platformFeeGstAmount = BigDecimal.ZERO;
+
+    @Builder.Default
     @Column(name = "auto_approved", nullable = false)
     private boolean autoApproved = false;
+
+    @Embedded
+    @Builder.Default
+    private ShiftDetails details = new ShiftDetails();
 
     @Version
     @Column(nullable = false)

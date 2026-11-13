@@ -40,6 +40,9 @@ public class FacilityWallet {
     @Column(name = "candidate_credits", nullable = false)
     private int candidateCredits = 0;
 
+    @Column(name = "first_completed_shift_id")
+    private UUID firstCompletedShiftId;
+
     @Version
     @Column(nullable = false)
     private Long version;

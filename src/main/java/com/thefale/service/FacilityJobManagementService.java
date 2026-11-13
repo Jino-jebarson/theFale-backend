@@ -168,6 +168,9 @@ public class FacilityJobManagementService {
                 return mapShiftClaimToDto(updated, shift, facility.getId());
             } else if ("REJECTED".equalsIgnoreCase(request.getStatus()) || "NO_SHOW".equalsIgnoreCase(request.getStatus())) {
                 boolean isNoShow = "NO_SHOW".equalsIgnoreCase(request.getStatus());
+                if (isNoShow ? !"CONFIRMED".equals(claim.getStatus()) || java.time.Instant.now().isBefore(shift.getStartAt())
+                        : !Set.of("CLAIMED", "CLAIM_PENDING_ADMIN", "CONFIRMED").contains(claim.getStatus()))
+                    throw new BadRequestException("This duty cannot be declined or marked no-show in its current state. Use the dispute workflow.");
                 claim.setStatus(isNoShow ? "NO_SHOW" : "REJECTED");
                 claim.setPayoutStatus("REFUNDED");
                 claim.setCheckInPin(null);
@@ -175,7 +178,7 @@ public class FacilityJobManagementService {
 
                 List<ShiftClaim> allShiftClaims = shiftClaimRepository.findByShiftId(shift.getId());
                 long activeCount = allShiftClaims.stream()
-                        .filter(c -> c.getStatus() != null && !nonFinalStatuses.contains(c.getStatus().toUpperCase()))
+                        .filter(ShiftRules::reservesSlot)
                         .count();
                 shift.setSlotsClaimed((int) activeCount);
                 if (activeCount < shift.getOpenings() && !Set.of("CANCELLED", "REJECTED", "COMPLETED", "EXPIRED").contains(shift.getStatus().toUpperCase())) {
@@ -201,11 +204,17 @@ public class FacilityJobManagementService {
                 if (!Set.of("CLAIMED", "CLAIM_PENDING_ADMIN").contains(claim.getStatus().toUpperCase())) {
                     throw new BadRequestException("Cannot confirm shift claim from status " + claim.getStatus());
                 }
+                if (!Set.of("OPEN", "FILLED").contains(shift.getStatus()) || shift.getSlotsClaimed() >= shift.getOpenings())
+                    throw new BadRequestException("All shift slots are already confirmed or this shift is closed.");
+                shiftClaimService.verifyCandidateForConfirmation(claim.getCandidateId(), shift);
+                shift.setSlotsClaimed(shift.getSlotsClaimed() + 1);
+                locumShiftRepository.save(shift);
                 String pin = (claim.getCheckInPin() != null && !claim.getCheckInPin().isBlank())
                         ? claim.getCheckInPin()
                         : ShiftClaimService.generateCheckInPin();
                 claim.setStatus("CONFIRMED");
                 claim.setCheckInPin(pin);
+                claim.setCheckInQrToken(UUID.randomUUID().toString());
                 shiftClaimRepository.save(claim);
 
                 CandidateProfile candidate = candidateProfileRepository.findById(claim.getCandidateId()).orElse(null);
@@ -213,7 +222,7 @@ public class FacilityJobManagementService {
                     Notification notification = Notification.builder()
                             .userId(candidate.getUserId())
                             .title("Shift Confirmed: " + shift.getTitle())
-                            .message("Your slot for " + shift.getTitle() + " at " + facility.getHospitalName() + " is confirmed. Your floor Check-In PIN: " + pin)
+                            .message("Your slot for " + shift.getTitle() + " at " + facility.getHospitalName() + " is confirmed. Ask the duty supervisor for check-in credentials on arrival.")
                             .type("SHIFT")
                             .actionUrl("/shifts")
                             .read(false)
@@ -528,6 +537,9 @@ public class FacilityJobManagementService {
         return JobApplicationDto.builder()
                 .id(claim.getId())
                 .jobId(shift != null ? shift.getId() : null)
+                .shiftId(shift != null ? shift.getId() : null)
+                .shiftStartAt(shift != null ? shift.getStartAt() : null)
+                .shiftEndAt(shift != null ? shift.getEndAt() : null)
                 .jobTitle(shift != null ? shift.getTitle() + " (Locum Shift)" : "Locum Shift")
                 .facilityName(shiftFacility != null ? shiftFacility.getHospitalName() : null)
                 .department(shift != null ? shift.getDepartment() : null)
@@ -554,6 +566,8 @@ public class FacilityJobManagementService {
                 .scheduledHours(shift != null ? shift.getHours() : 8)
                 .hourlyRatePaise(shift != null ? shift.getRatePerHour().add(shift.getSurgeRatePerHour() != null ? shift.getSurgeRatePerHour() : BigDecimal.ZERO).multiply(BigDecimal.valueOf(100)).longValue() : 0L)
                 .checkInPin(claim.getCheckInPin())
+                .checkInQrToken(claim.getCheckInQrToken())
+                .attendanceRecorded(claim.getCheckInSelfie() != null)
                 .disputeReason(claim.getDisputeReason())
                 .hospitalRating(claim.getHospitalRating())
                 .hospitalReview(claim.getHospitalReview())

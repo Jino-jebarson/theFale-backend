@@ -22,6 +22,7 @@ public class PostShiftRequest {
 
     @NotBlank(message = "Shift title is required")
     private String title;
+    private com.thefale.entity.ShiftDetails details;
 
     @NotBlank(message = "Department is required")
     private String department;

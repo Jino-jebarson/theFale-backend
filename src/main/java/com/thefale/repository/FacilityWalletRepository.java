@@ -17,6 +17,10 @@ public interface FacilityWalletRepository extends JpaRepository<FacilityWallet, 
     Optional<FacilityWallet> findByFacilityId(UUID facilityId);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT w FROM FacilityWallet w WHERE w.id = :id")
+    Optional<FacilityWallet> findByIdWithLock(@Param("id") UUID id);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT w FROM FacilityWallet w WHERE w.facilityId = :facilityId")
     Optional<FacilityWallet> findByFacilityIdWithLock(@Param("facilityId") UUID facilityId);
 }

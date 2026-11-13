@@ -90,24 +90,26 @@ public class PayoutController {
 
     private byte[] buildPayoutSlipPdf(ShiftClaimDto dto) {
         List<String> lines = List.of(
-                "FALE HEALTHCARE - OFFICIAL LOCUM PAYOUT & TDS ADVICE",
+                "FALE HEALTHCARE - RECORDED PAYOUT ADVICE",
                 "------------------------------------------------------------------------",
                 "Slip Reference : " + safe(dto.getPayoutSlipRef(), dto.getId().toString()),
                 "Payout Status  : " + safe(dto.getPayoutStatus(), "IN_ESCROW"),
-                "UTR Reference  : " + safe(dto.getUtr(), "Pending Banking Disbursement"),
+                "UTR Reference  : " + safe(dto.getUtr(), "Not recorded"),
+                "Disbursed at   : " + (dto.getDisbursedAt() == null ? "Not recorded" : dto.getDisbursedAt().toString()),
+                "Destination    : " + safe(dto.getPayoutMethodSnapshot(), "Historical destination not recorded"),
                 "------------------------------------------------------------------------",
-                "Clinician      : " + safe(dto.getCandidateName(), "Verified Clinician"),
+                "Clinician      : " + safe(dto.getCandidateName(), "Name not recorded"),
                 "Hospital       : " + safe(dto.getFacilityName(), "Partner Facility"),
                 "Duty Role      : " + safe(dto.getShiftTitle(), "Locum Shift") + " (" + safe(dto.getDepartment(), "General") + ")",
                 "Verified Hours : " + (dto.getActualHours() != null ? dto.getActualHours() : dto.getHours()) + " hrs",
                 "------------------------------------------------------------------------",
                 String.format("Gross Remuneration       : INR %.2f", dto.getGrossAmountPaise() / 100.0),
                 String.format("Platform Fee (%.1f%%)      : -INR %.2f", dto.getPlatformFeePercent(), dto.getPlatformFeePaise() / 100.0),
-                String.format("TDS Sec 194J/194C        : -INR %.2f", dto.getTdsAmountPaise() / 100.0),
+                String.format("Recorded TDS withholding : -INR %.2f", dto.getTdsAmountPaise() / 100.0),
                 "------------------------------------------------------------------------",
-                String.format("NET PAYOUT CREDITED      : INR %.2f", dto.getNetAmountPaise() / 100.0),
+                String.format(("DISBURSED".equals(dto.getPayoutStatus()) ? "NET PAID                 : INR %.2f" : "NET PAYABLE (NOT PAID)    : INR %.2f"), dto.getNetAmountPaise() / 100.0),
                 "------------------------------------------------------------------------",
-                "System-generated compliance statement by FALE Healthcare Escrow Ledger."
+                "Saved ledger amounts; not a tax certificate or confirmation of tax deposit."
         );
 
         StringBuilder stream = new StringBuilder();

@@ -104,6 +104,9 @@ public class FacilityProfile {
     @Column(name = "verified_at")
     private Instant verifiedAt;
 
+    @Column(name = "first_shift_approved", nullable = false)
+    private boolean firstShiftApproved;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;

@@ -16,6 +16,9 @@ public class JobApplicationDto {
 
     private UUID id;
     private UUID jobId;
+    private UUID shiftId;
+    private Instant shiftStartAt;
+    private Instant shiftEndAt;
     private String jobTitle;
     private UUID candidateId;
     private String candidateName;
@@ -51,6 +54,8 @@ public class JobApplicationDto {
     private Integer scheduledHours;
     private Long hourlyRatePaise;
     private String checkInPin;
+    private String checkInQrToken;
+    private boolean attendanceRecorded;
     private String disputeReason;
     private Integer hospitalRating;
     private String hospitalReview;

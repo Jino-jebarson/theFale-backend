@@ -22,6 +22,7 @@ public class LocumShiftDto {
     private String facilityName;
     private String city;
     private String title;
+    private com.thefale.entity.ShiftDetails details;
     private String department;
     private Instant startAt;
     private Instant endAt;
@@ -44,6 +45,8 @@ public class LocumShiftDto {
     private double facilityFeePercent;
 
     private long facilityFeePaise;
+    private double platformFeeGstPercent;
+    private long platformFeeGstPaise;
 
     private long totalEscrowRequiredPaise;
 

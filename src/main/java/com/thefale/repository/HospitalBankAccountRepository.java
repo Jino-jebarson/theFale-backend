@@ -11,4 +11,10 @@ import java.util.UUID;
 public interface HospitalBankAccountRepository extends JpaRepository<HospitalBankAccount, UUID> {
 
     Optional<HospitalBankAccount> findByFacilityId(UUID facilityId);
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @org.springframework.data.jpa.repository.Query("select b from HospitalBankAccount b where b.facilityId = :id")
+    Optional<HospitalBankAccount> findByFacilityIdWithLock(UUID id);
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @org.springframework.data.jpa.repository.Query("select b from HospitalBankAccount b where b.id = :id")
+    Optional<HospitalBankAccount> findByIdWithLock(UUID id);
 }

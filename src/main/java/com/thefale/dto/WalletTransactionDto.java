@@ -17,6 +17,8 @@ public class WalletTransactionDto {
     private UUID walletId;
     private String type;
     private long amountPaise;
+    private Long platformFeePaise;
+    private Long platformFeeGstPaise;
     private long balanceAfterPaise;
     private String status;
     private String refNumber;
@@ -24,5 +26,11 @@ public class WalletTransactionDto {
     private String title;
     private String subtitle;
     private String invoiceId;
+    private UUID claimId;
+    private Instant reviewedAt;
+    private String reviewNotes;
+    private boolean canonicalDocument;
+    private String destinationSnapshot;
+    private Instant bankDisbursedAt;
     private Instant createdAt;
 }

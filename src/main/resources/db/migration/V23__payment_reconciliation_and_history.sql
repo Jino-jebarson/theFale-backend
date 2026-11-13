@@ -1,0 +1,14 @@
+ALTER TABLE wallet_transactions ADD COLUMN claim_id UUID REFERENCES shift_claims(id);
+ALTER TABLE wallet_transactions ADD COLUMN document_number VARCHAR(64);
+ALTER TABLE wallet_transactions ADD COLUMN reviewed_by UUID;
+ALTER TABLE wallet_transactions ADD COLUMN reviewed_at TIMESTAMPTZ;
+ALTER TABLE wallet_transactions ADD COLUMN review_notes TEXT;
+ALTER TABLE wallet_transactions ADD COLUMN destination_snapshot VARCHAR(255);
+ALTER TABLE wallet_transactions ADD COLUMN bank_disbursed_at TIMESTAMPTZ;
+CREATE UNIQUE INDEX uq_wallet_document_number ON wallet_transactions(document_number) WHERE document_number IS NOT NULL;
+CREATE UNIQUE INDEX uq_wallet_claim_settlement ON wallet_transactions(claim_id) WHERE claim_id IS NOT NULL AND type = 'disbursement';
+ALTER TABLE wallet_transactions DROP CONSTRAINT IF EXISTS wallet_transactions_status_check;
+ALTER TABLE wallet_transactions ADD CONSTRAINT wallet_transactions_status_check CHECK (status IN ('Completed','In Escrow','Processing','Refunded','Pending Reconciliation','Rejected'));
+ALTER TABLE shift_claims ADD COLUMN payout_method_snapshot VARCHAR(255);
+ALTER TABLE shift_claims ADD COLUMN payout_candidate_name VARCHAR(100);
+ALTER TABLE shift_claims ADD COLUMN payout_registration_number VARCHAR(100);

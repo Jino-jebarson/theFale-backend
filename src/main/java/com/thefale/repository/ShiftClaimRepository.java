@@ -25,7 +25,7 @@ public interface ShiftClaimRepository extends JpaRepository<ShiftClaim, UUID> {
     @Query("SELECT COUNT(c) FROM ShiftClaim c WHERE c.candidateId = :candidateId AND c.status = 'COMPLETED' AND c.id <> :excludeClaimId")
     long countCompletedClaimsExcluding(@Param("candidateId") UUID candidateId, @Param("excludeClaimId") UUID excludeClaimId);
 
-    @Query("SELECT c FROM ShiftClaim c WHERE c.candidateId = :candidateId AND c.status IN ('CLAIMED', 'CONFIRMED', 'CHECKED_IN', 'IN_PROGRESS', 'TIMESHEET_SUBMITTED', 'CLAIM_PENDING_ADMIN')")
+    @Query("SELECT c FROM ShiftClaim c WHERE c.candidateId = :candidateId AND c.status IN ('CONFIRMED', 'CHECKED_IN', 'IN_PROGRESS', 'TIMESHEET_SUBMITTED')")
     List<ShiftClaim> findActiveClaimsByCandidate(@Param("candidateId") UUID candidateId);
 
     @Query("SELECT c FROM ShiftClaim c WHERE c.candidateId = :candidateId AND c.hospitalRating IS NOT NULL")

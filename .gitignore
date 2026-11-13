@@ -31,5 +31,6 @@ target/
 
 ### Secrets and Uploads ###
 .env
+.local-secrets/
 uploads/
 *.log

@@ -34,6 +34,7 @@ public class CandidatePayoutMethod {
     private String bankName;
 
     @Column(name = "account_number_encrypted", length = 255)
+    @Convert(converter = com.thefale.security.BankAccountConverter.class)
     private String accountNumberEncrypted;
 
     @Column(name = "account_number_last4", length = 4)
