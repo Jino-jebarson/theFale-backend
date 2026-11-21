@@ -20,5 +20,8 @@ public class CandidateDocumentDto {
     private Long fileSizeBytes;
     private String mimeType;
     private boolean verified;
+    private String reviewStatus;
+    private String reviewNotes;
+    private Instant reviewedAt;
     private Instant createdAt;
 }

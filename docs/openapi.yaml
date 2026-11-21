@@ -311,6 +311,44 @@ paths:
               schema:
                 $ref: '#/components/schemas/CandidateProfileResponse'
 
+  /api/v1/candidates/me/referrals:
+    get:
+      tags: [Candidates]
+      summary: Get Candidate Referral Code and Reward Dashboard
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Referral code, reward terms, totals, and referred candidates
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/candidates/me/referrals/apply:
+    post:
+      tags: [Candidates]
+      summary: Apply a Referral Code to the Current Candidate
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [referralCode]
+              properties:
+                referralCode:
+                  type: string
+                  example: FLABC234
+      responses:
+        '200':
+          description: Referral linked to this candidate account
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
   /api/v1/candidates/me/documents:
     post:
       tags: [Candidates]
@@ -1820,6 +1858,74 @@ paths:
               schema:
                 $ref: '#/components/schemas/AdminDashboardResponse'
 
+  /api/v1/admin/referrals/rewards:
+    get:
+      tags: [Admin Compliance]
+      summary: List Referral Rewards Due or Held for Review
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Rewards awaiting payment or admin review
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/admin/referrals/rewards/{id}/release:
+    post:
+      tags: [Admin Compliance]
+      summary: Release a Held Referral Reward for Payout
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Reward released
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/admin/referrals/rewards/{id}/paid:
+    post:
+      tags: [Admin Compliance]
+      summary: Record Referral Reward Payment
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [paymentReference]
+              properties:
+                paymentReference:
+                  type: string
+                  minLength: 6
+                  maxLength: 50
+      responses:
+        '200':
+          description: Payment reference recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
   /api/v1/admin/audit-logs:
     get:
       tags: [Admin Compliance]
@@ -2665,6 +2771,9 @@ components:
         city:
           type: string
           maxLength: 50
+        locality:
+          type: string
+          maxLength: 100
         candidateLevel:
           type: string
           enum: [STUDENT, FRESHER, PROFESSIONAL]
@@ -2681,6 +2790,12 @@ components:
         universityRegNo:
           type: string
           maxLength: 50
+        expectedGraduationYear:
+          type: integer
+        expectedGraduationMonth:
+          type: string
+          pattern: '^\\d{4}-(0[1-9]|1[0-2])$'
+          example: "2028-06"
         # Graduate fields
         profession:
           type: string
@@ -2718,12 +2833,14 @@ components:
           type: string
         city:
           type: string
+        locality:
+          type: string
         candidateLevel:
           type: string
           enum: [STUDENT, FRESHER, PROFESSIONAL]
         kycStatus:
           type: string
-          enum: [PENDING, VERIFIED, REJECTED]
+          enum: [DOCUMENTS_REQUIRED, PENDING, VERIFIED, REJECTED]
         course:
           type: string
         college:
@@ -2731,6 +2848,10 @@ components:
         studyYear:
           type: string
         universityRegNo:
+          type: string
+        expectedGraduationYear:
+          type: integer
+        expectedGraduationMonth:
           type: string
         profession:
           type: string

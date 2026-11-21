@@ -1,0 +1,764 @@
+# V53 source control and modal index
+
+Generated from the local V53 HTML. This is a lexical index, not a runtime screen list: it includes superseded implementations, conditional branches and dynamically assembled markup. Source line numbers refer to the original HTML. Items beginning with code fragments need inspection in context.
+
+## Public website
+
+- L885: `<label for="f-role">Role</label>`
+- L886: `<select id="f-role" name="role">`
+- L890: `<label for="f-loc">Location</label>`
+- L891: `<select id="f-loc" name="location">`
+- L899: `<label for="f-exp">Experience</label>`
+- L900: `<select id="f-exp" name="experience">`
+- L978: `<label class="chipsel"><span class="sr-only">Location</span>`
+- L978: `<select id="stLoc">`
+- L979: `<label class="chipsel"><span class="sr-only">Experience</span>`
+- L979: `<select id="stExp">`
+- L987: `<label class="sr-only" for="needText">Who do you need?</label>`
+- L988: `<textarea id="needText" rows="2" placeholder="e.g. 2 ICU nurses near Whitefield, ₹30–36k a month, 2+ years, can join in 2 weeks">`
+- L1129: `<label for="mf_name">Full name</label>`
+- L1129: `<input id="mf_name" autocomplete="name">`
+- L1130: `<label for="mf_phone">Mobile number</label>`
+- L1130: `<input id="mf_phone" inputmode="numeric" maxlength="10" autocomplete="tel-national" placeholder="10 digits">`
+- L1131: `<label for="mf_email">Email (optional)</label>`
+- L1131: `<input id="mf_email" type="email" autocomplete="email">`
+- L1132: `<label for="mf_prof">Profession</label>`
+- L1132: `<select id="mf_prof">`
+- L1134: `<label>`
+- L1134: `<input type="radio" name="mf_route" value="8+ years of experience">`
+- L1135: `<label>`
+- L1135: `<input type="radio" name="mf_route" value="College faculty or HOD">`
+- L1136: `<label>`
+- L1136: `<input type="radio" name="mf_route" value="Author">`
+- L1137: `<label>`
+- L1137: `<input type="radio" name="mf_route" value="Association office-bearer">`
+- L1138: `<label for="mf_inst">Where you work or teach, or your book or association</label>`
+- L1138: `<input id="mf_inst">`
+- L1139: `<label for="mf_link">LinkedIn or profile link (optional)</label>`
+- L1139: `<input id="mf_link" type="url" placeholder="https://">`
+- L1140: `<label class="m-chk m-f full">`
+- L1140: `<input type="checkbox" id="mf_agency">`
+- L1141: `<label class="m-chk m-f full">`
+- L1141: `<input type="checkbox" id="mf_ok">`
+- L1305: `<input id="allyIn" autocomplete="off" placeholder="Ask about jobs, shifts, hiring…" aria-label="Message Ally">`
+- L1620: `<input id="rolexQ" type="search" placeholder="Search, e.g. optometrist" autocomplete="off">`
+
+## Sign-in
+
+- L1958: `<label class="input" for="phoneInput"><span class="pre">🇮🇳 +91</span>`
+- L1958: `<input id="phoneInput" type="tel" inputmode="numeric" maxlength="11" placeholder="98765 43210" autocomplete="tel-national" aria-label="Mobile number">`
+- L1965: `<input inputmode="numeric" maxlength="1" aria-label="Digit 1">`
+- L1965: `<input inputmode="numeric" maxlength="1" aria-label="Digit 2">`
+- L1965: `<input inputmode="numeric" maxlength="1" aria-label="Digit 3">`
+- L1965: `<input inputmode="numeric" maxlength="1" aria-label="Digit 4">`
+- L1965: `<input inputmode="numeric" maxlength="1" aria-label="Digit 5">`
+- L1965: `<input inputmode="numeric" maxlength="1" aria-label="Digit 6">`
+- L1973: `<input id="emailInput" type="email" placeholder="you@email.com" autocomplete="email" aria-label="Email address">`
+
+## Base app and legacy setup
+
+- L5304: `mhead(t,p){return '<header><div><h2>'+t+'</h2>'+(p?'<p class="muted" style="font-size:13.5px">'+p+'</p>':''`
+- L5348: `<label for="upiid">Your UPI ID</label>`
+- L5348: `<input class="input" id="upiid" placeholder="name@bank" autocomplete="off">`
+- L5350: `<label>Card number</label>`
+- L5350: `<input class="input mono" value="4111 1111 1111 1111" readonly aria-readonly="true">`
+- L5350: `<label>Expiry</label>`
+- L5350: `<input class="input mono" value="12 / 30" readonly>`
+- L5350: `<label>CVV</label>`
+- L5350: `<input class="input mono" value="•••" readonly>`
+- L5400: `<label class="search">'+ic('search',17)+'`
+- L5400: `<input id="q" type="search" placeholder="'+cfg.search+'" aria-label="'+cfg.search+'">`
+- L5421: `mhead('More'`
+- L5737: `<label class="drop'+(small?' sm':'')+'" for="'+id+'" data-drop="'+id+'">`
+- L5737: `<input type="file" id="'+id+'" accept=".pdf,.docx,.doc,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document">`
+- L5841: `<label for="'+id+'">'+label+(req?' <span class="req">*</span>':'')+cvTag(id)+'</label>`
+- L5841: `<select class="select" id="'+id+'" data-f="'+id+'">`
+- L5842: `<label for="'+id+'">'+label+(req?' <span class="req">*</span>':'')+cvTag(id)+'</label>`
+- L5842: `<input class="input" id="'+id+'" data-f="'+id+'" type="'+(type||'text')+'" value="'+esc(val)+'" placeholder="'+esc(ph||'')+'">`
+- L5853: `<label for="e'+i+'org">Hospital or clinic <span class="req">*</span></label>`
+- L5853: `<input class="input" id="e'+i+'org" data-e="'+i+'" data-k="org" value="'+esc(e.org||'')+'" placeholder="e.g. Sunrise Hospital">`
+- L5854: `<label for="e'+i+'role">Designation <span class="req">*</span></label>`
+- L5854: `<input class="input" id="e'+i+'role" data-e="'+i+'" data-k="role" value="'+esc(e.role||'')+'" placeholder="'+esc(PR()&&PR().title?'e.g. '+PR().title:'Your role')+'">`
+- L5857: `<label style="display:flex;gap:10px;align-items:center;font-size:14px;font-weight:600;grid-column:1/-1">`
+- L5857: `<input type="checkbox" data-e="'+i+'" data-k="cur"'+(e.cur?' checked':'')+' style="width:18px;height:18px;accent-color:var(--orange)">`
+- L5859: `<select class="select" data-e="'+i+'" data-k="'+k+'" aria-label="'+ph+'">`
+- L5867: `<label>Department</label>`
+- L5867: `<input class="input" disabled placeholder="Pick a profession first">`
+- L5871: `<input class="input" id="skilladd" placeholder="Add a skill that\'s not listed" aria-label="Add a skill">`
+- L5873: `<label for="reg">'+esc(p&&p.regLabel||'Registration number')+' <span class="req">*</span></label>`
+- L5873: `<input class="input mono" id="reg" data-f="reg" value="'+esc(f.reg)+'" placeholder="'+esc(p&&p.regPh||'As printed on your certificate')+'">`
+- L5926: `<label for="h_'+id+'">'+l+(req?' <span class="req">*</span>':'')+'</label>`
+- L5926: `<input class="input" id="h_'+id+'" data-f="'+id+'" type="'+(t||'text')+'" value="'+esc(v)+'" placeholder="'+esc(ph||'')+'">`
+- L5927: `<label for="h_'+id+'">'+l+' <span class="req">*</span></label>`
+- L5927: `<select class="select" id="h_'+id+'" data-f="'+id+'">`
+- L6216: `<input id="tq" type="search" placeholder="'+cfg.search+'" aria-label="'+cfg.search+'">`
+- L6230: `mhead('More'`
+- L6253: `mhead('Profile picture','Upload a photo, or pick an illustrated character. Hospitals see this on your profile.'`
+- L6254: `<label class="btn primary sm" for="avfile">'+ic('camera',15)+'Upload a photo`
+- L6254: `<input type="file" id="avfile" accept="image/*" hidden>`
+- L6477: `mhead(esc(title`
+- L6492: `mhead('Notifications'`
+- L6512: `<input class="input" id="hr_'+post.id+'" placeholder="Write a reply" aria-label="Reply">`
+- L6528: `<textarea class="textarea" id="hdraft" placeholder="'+esc({Thought:'Share a short thought or something you learned',Experience:'Tell a real story from work or training',Case:'Describe a case. No names`
+- L6530: `<label class="btn sm" for="himg">'+ic('image',15)+'Add image`
+- L6530: `<input type="file" id="himg" accept="image/*" hidden>`
+- L6533: `<select class="select sm" id="htype" aria-label="Post type">`
+- L6563: `mhead('Report this post','The Fale team reviews every report. Three reports from different verified members hide it straight away.'`
+- L6565: `mhead('Refer this job to The Fale','We contact the hospital and post it properly, so verified people can apply.'`
+- L6565: `<label for="rf_h">Hospital name</label>`
+- L6565: `<input class="input" id="rf_h">`
+- L6565: `<label for="rf_r">Role</label>`
+- L6565: `<input class="input" id="rf_r" placeholder="e.g. Staff nurse, ICU">`
+- L6581: `<textarea class="textarea" id="mq" style="margin-top:10px" placeholder="e.g. Should I do a sports physio certification before or after graduating?">`
+- L6584: `<input class="input" id="ma_'+q.id+'" placeholder="Answer as a mentor">`
+- L6615: `<input class="input" id="ally-in" autocomplete="off" placeholder="Ask Ally anything about The Fale" aria-label="Message Ally">`
+- L6727: `mhead(esc(m.t`
+- L6738: `mhead('Add '+esc(el.dataset.c`
+- L6738: `<label class="drop sm" for="ct_f">`
+- L6738: `<input type="file" id="ct_f" accept="image/*,.pdf" hidden>`
+- L6815: `mhead(esc(title`
+- L6921: `mhead('Interview practice · '+profLabel(PRAC.prof`
+- L6922: `<textarea class="textarea" id="prac_a" placeholder="Type your answer…" style="min-height:120px">`
+- L6940: `<textarea class="textarea" id="drft" style="min-height:130px">`
+- L6980: `<label for="s_'+id+'">'+l+' <span class="req">*</span></label>`
+- L6980: `<input class="input" id="s_'+id+'" data-f="'+id+'" type="'+(t||'text')+'" value="'+esc(f[id])+'" placeholder="'+esc(ph||'')+'">`
+- L6981: `<label for="s_'+id+'">'+l+' <span class="req">*</span></label>`
+- L6981: `<select class="select" id="s_'+id+'" data-f="'+id+'">`
+- L6989: `<label for="s_univReg">Registration number <span class="req">*</span></label>`
+- L6989: `<input class="input mono" id="s_univReg" data-f="univReg" value="'+esc(f.univReg)+'" placeholder="e.g. 21BPT0456">`
+- L6990: `<label class="drop sm" for="s_file">`
+- L6990: `<input type="file" id="s_file" accept="image/*,.pdf" hidden>`
+
+## Professional, hospital and team portals
+
+- L7145: `<input id="jq" type="search" value="'+esc(JOBS.q)+'" placeholder="Search role, hospital, skill…" aria-label="Search jobs">`
+- L7145: `<select class="select" id="jarea" aria-label="Area">`
+- L7145: `<select class="select" id="jkind" aria-label="Type">`
+- L7164: `<label for="pf_area">Area</label>`
+- L7164: `<select class="select" id="pf_area" data-cf="area">`
+- L7165: `<label>College</label>`
+- L7165: `<input class="input" value="'+esc(p.college)+'" disabled>`
+- L7165: `<label for="pf_spec">Specialties (comma separated)</label>`
+- L7165: `<input class="input" id="pf_spec" data-cf="specialties" value="'+esc((p.specialties||[]).join(', '))+'" placeholder="e.g. ICU, Emergency">`
+- L7166: `<label for="pf_sk">Skills (comma separated)</label>`
+- L7166: `<input class="input" id="pf_sk" data-cf="skills" value="'+esc((p.skills||[]).join(', '))+'">`
+- L7170: `mhead('Open to Work','Hospitals find you based on this. Actively looking + join within 15 days + 80% profile = Priority pool.'`
+- L7171: `<label for="o_av">Can join in</label>`
+- L7171: `<select class="select" id="o_av">`
+- L7171: `<label for="o_sal">Expected salary / month (₹)</label>`
+- L7171: `<input class="input" id="o_sal" type="number" value="'+(p.salaryMin||'')+'" placeholder="e.g. 28000">`
+- L7172: `<label for="o_hide">Hide me from</label>`
+- L7172: `<select class="select" id="o_hide">`
+- L7185: `mhead('Claim this shift',esc(cleanOrg(o)`
+- L7190: `mhead(esc(r.title`
+- L7192: `mhead('Apply to '+esc(r.title`
+- L7201: `<label class="drop sm" for="g_file">`
+- L7201: `<input type="file" id="g_file" accept="image/*,.pdf" hidden>`
+- L7205: `mhead('Upload '+L[d],'A person at The Fale checks it within 24–48 hours.'`
+- L7205: `<label for="u_no">Registration number</label>`
+- L7205: `<input class="input mono" id="u_no" value="'+esc(p.regNo||'')+'" placeholder="e.g. KSAHC-PT-3120">`
+- L7205: `<label class="drop sm" for="u_file">`
+- L7205: `<input type="file" id="u_file" accept="image/*,.pdf" hidden>`
+- L7348: `<textarea class="textarea tall" id="treq" placeholder="e.g. Need 2 ICU nurses near Whitefield, 30–36k, 2+ years, join in 2 weeks, registration must">`
+- L7363: `<input id="cq" type="search" value="'+esc(HV.cq)+'" placeholder="Search by skill (ICU, OT, dialysis), specialty or area…" aria-label="Search candidates">`
+- L7363: `<select class="select" id="crole" aria-label="Role">`
+- L7363: `<select class="select" id="carea" aria-label="Area">`
+- L7373: `<label>'+lbl+(miss?' <span class="askme">'+ic('help',12)+'Needed</span>':'')+'</label>`
+- L7375: `<select class="select" data-tf="kind">`
+- L7376: `<select class="select" data-tf="profession">`
+- L7377: `<input class="input" type="number" min="1" max="50" data-tf="openings" value="'+f.openings+'">`
+- L7378: `<select class="select" data-tf="area">`
+- L7379: `<select class="select" data-tf="radius">`
+- L7380: `<select class="select" data-tf="minYears">`
+- L7381: `<input class="input" type="number" data-tf="budgetMin" value="'+(f.budgetMin||'')+'" placeholder="e.g. 28000">`
+- L7382: `<input class="input" type="number" data-tf="budgetMax" value="'+(f.budgetMax||'')+'" placeholder="e.g. 34000">`
+- L7383: `<select class="select" data-tf="joinWithin">`
+- L7384: `<input class="input" data-tf="specialties" value="'+esc(f.specialties.join(', '))+'" placeholder="e.g. ICU, Emergency">`
+- L7384: `<input class="input" data-tf="title" value="'+esc(f.title)+'">`
+- L7384: `<label style="justify-content:space-between"><span>Job description <span class="muted" style="font-weight:500">(optional, shown to candidates)</span></span>'+aiBtn('aijd',f.desc?'Rewrite':'Write it fo`
+- L7384: `<textarea class="textarea" data-tf="desc" id="tdesc" placeholder="Duties, team, shift pattern, perks…">`
+- L7411: `<label for="sf_t">Shift title</label>`
+- L7411: `<input class="input" id="sf_t" data-sf="title" placeholder="e.g. Night Staff Nurse · ICU">`
+- L7412: `<label for="sf_p">Role</label>`
+- L7412: `<select class="select" id="sf_p" data-sf="profession">`
+- L7412: `<label for="sf_d">Department</label>`
+- L7412: `<input class="input" id="sf_d" data-sf="dept" placeholder="e.g. ICU">`
+- L7413: `<label for="sf_dt">Date</label>`
+- L7413: `<input class="input" type="date" id="sf_dt" data-sf="date" value="'+f.date+'">`
+- L7413: `<label for="sf_sl">People needed</label>`
+- L7413: `<input class="input" type="number" min="1" max="10" id="sf_sl" data-sf="slots" value="1">`
+- L7414: `<label for="sf_s">Start</label>`
+- L7414: `<input class="input" type="time" id="sf_s" data-sf="start" value="'+f.start+'">`
+- L7414: `<label for="sf_e">End</label>`
+- L7414: `<input class="input" type="time" id="sf_e" data-sf="end" value="'+f.end+'">`
+- L7415: `<label for="sf_r">Pay per hour (₹)</label>`
+- L7415: `<input class="input" type="number" id="sf_r" data-sf="rate" value="'+f.rate+'">`
+- L7423: `mhead('Top up shift wallet','Money stays in your wallet until you approve a timesheet.'`
+- L7433: `mhead('Unlock this candidate?','Uses 1 credit. You get their name, phone, email, registration number and resume.'`
+- L7436: `mhead('Add '+esc(p.name`
+- L7438: `mhead('Hospital photos','Your logo and cover photo show to candidates on every job and shift.'`
+- L7438: `<label class="btn sm" for="lg_f">'+ic('camera',14)+'Upload logo`
+- L7438: `<input type="file" id="lg_f" accept="image/*" hidden>`
+- L7438: `<label class="btn sm" for="bn_f">'+ic('image',14)+'Upload cover photo`
+- L7438: `<input type="file" id="bn_f" accept="image/*" hidden>`
+- L7466: `mhead('Schedule an interview with '+esc(contactOpen(a)?p.name:p.short)`
+- L7466: `<label for="iv_d">Date</label>`
+- L7466: `<input class="input" type="date" id="iv_d" value="'+fromNow(2).slice(0,10)+'">`
+- L7466: `<label for="iv_t">Time</label>`
+- L7466: `<input class="input" type="time" id="iv_t" value="11:00">`
+- L7471: `mhead('Mark '+esc(p.name`
+- L7471: `<label for="h_join">Joining date</label>`
+- L7471: `<input class="input" type="date" id="h_join" value="'+(a.offer&&a.offer.join||new Date().toISOString().slice(0,10))+'">`
+- L7471: `<label for="h_ctc">Annual CTC (₹)</label>`
+- L7471: `<input class="input" type="number" id="h_ctc" value="'+est+'">`
+- L7481: `mhead('Free replacement','Sorry they left. We\'ll find a replacement at no cost and reopen this job.'`
+- L7481: `<label for="rp_w">What happened? (optional)</label>`
+- L7481: `<textarea class="textarea" id="rp_w">`
+- L7483: `mhead('What we check'`
+- L7511: `<label for="po_name">Account holder name</label>`
+- L7511: `<input class="input" id="po_name" value="'+esc(p.name)+'">`
+- L7512: `<label for="po_upi">UPI ID</label>`
+- L7512: `<input class="input" id="po_upi" placeholder="name@bank" autocomplete="off">`
+- L7512: `<label for="po_acc">Account number</label>`
+- L7512: `<input class="input mono" id="po_acc" inputmode="numeric" autocomplete="off" placeholder="9–18 digits">`
+- L7512: `<label for="po_ifsc">IFSC</label>`
+- L7512: `<input class="input mono" id="po_ifsc" placeholder="e.g. HDFC0001234" maxlength="11">`
+- L7513: `<label for="po_pan">PAN</label>`
+- L7513: `<input class="input mono" id="po_pan" placeholder="ABCDE1234F" maxlength="10" autocomplete="off">`
+- L7552: `<label for="ad_e">Work email</label>`
+- L7552: `<input class="input" id="ad_e" type="email" value="ops@thefale.com" autocomplete="username">`
+- L7553: `<label for="ad_o">6-digit code</label>`
+- L7553: `<input class="input mono" id="ad_o" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="••••••">`
+- L7624: `<label class="mpick">`
+- L7624: `<input type="checkbox" value="'+m.id+'"'+(i<3?' checked':'')+'>`
+- L7640: `mhead('Reject: '+esc(v.label`
+
+## Community, guest and quick join
+
+- L7735: `mhead('How tags work','Tags are earned, never bought. The Fale checks every one.'`
+- L7766: `<label for="v2hide">Hide me from my current hospital</label>`
+- L7766: `<select class="select" id="v2hide" data-v2="hide">`
+- L7778: `<label for="vf_code">Code sent to '+esc(VF.mail)+'</label>`
+- L7778: `<input class="input mono" id="vf_code" inputmode="numeric" maxlength="6" placeholder="6-digit code">`
+- L7779: `<label for="vf_mail">College email (fastest)</label>`
+- L7779: `<input class="input" id="vf_mail" type="email" value="'+esc(VF.mail)+'" placeholder="name@college.ac.in">`
+- L7780: `<label class="drop sm" for="vf_file">`
+- L7780: `<input type="file" id="vf_file" accept="image/*,.pdf" hidden>`
+- L7789: `<label for="vf_c">Council</label>`
+- L7789: `<select class="select" id="vf_c">`
+- L7790: `<label for="vf_r">Registration number</label>`
+- L7790: `<input class="input mono" id="vf_r" value="'+esc(VF.reg)+'" placeholder="e.g. KNC 45678">`
+- L7791: `<label class="drop sm" for="vf_deg">`
+- L7791: `<input type="file" id="vf_deg" accept="image/*,.pdf" hidden>`
+- L7794: `mhead(head,sub`
+- L7803: `<label class="drop sm" for="vf_id">`
+- L7803: `<input type="file" id="vf_id" accept="image/*,.pdf" hidden>`
+- L7823: `mhead('Apply to '+esc(r.title`
+- L7836: `mhead('Report this job','The Fale team checks every report within 24 hours. The hospital doesn\'t see who reported it.'`
+- L7848: `mhead('Get verified first','Mentors are verified professionals. Verify once, then apply.'`
+- L7852: `mhead('Apply to be a mentor',foundingLeft(`
+- L7854: `<label for="ma_inst">'+(MA.route==='faculty'?'College':MA.route==='author'?'Book title or ISBN, or papers':'Association and role')+'</label>`
+- L7854: `<input class="input" id="ma_inst" value="'+esc(MA.inst)+'">`
+- L7855: `<label for="ma_proof">Proof</label>`
+- L7855: `<label class="drop sm" for="ma_proof">`
+- L7855: `<input type="file" id="ma_proof" accept="image/*,.pdf" hidden>`
+- L7857: `<label class="qlab" for="ma_a'+i+'">'+esc(t)+'</label>`
+- L7857: `<textarea class="textarea" id="ma_a'+i+'" rows="3" placeholder="Your answer">`
+- L7892: `mhead('Mentor review: '+esc(p.name`
+- L7896: `<label>`
+- L7896: `<input type="checkbox" class="mck" data-i="'+i+'">`
+- L7897: `<label for="mr_by">Second sign-off (a founder)</label>`
+- L7897: `<select class="select" id="mr_by">`
+- L7928: `<input class="input" id="hr_'+post.id+'" placeholder="Write a reply. Replies are public" aria-label="Reply">`
+- L7932: `<textarea class="textarea" id="hdraft" placeholder="'+esc({Thought:'Share a short thought or something you learned',Experience:'Tell a real story from work or training',Case:'Describe a case. No names`
+- L7936: `<label class="btn sm" for="himg">'+ic('image',15)+(HUD.imgs.length?'Add another':'Add photos')+'`
+- L7936: `<input type="file" id="himg" accept="image/*" multiple hidden>`
+- L7988: `mhead('Check your photo','Tap anything private to blur it: faces, names, wristbands, screens. Location and camera details are removed.'`
+- L7990: `<label>`
+- L7990: `<input type="checkbox" class="phk" data-i="'+i+'"'+(PH.ticks[i]?' checked':'')+'>`
+- L8013: `mhead('Voice question','Replies stay public, like every Huddle post.'`
+- L8054: `<label for="pv_prof">Profession</label>`
+- L8054: `<select class="select" id="pv_prof">`
+- L8054: `<label for="pv_area">Area</label>`
+- L8054: `<select class="select" id="pv_area">`
+- L8058: `<label for="py_b">Experience</label>`
+- L8058: `<select class="select" id="py_b">`
+- L8059: `<label for="py_a">Area</label>`
+- L8059: `<select class="select" id="py_a">`
+- L8059: `<label for="py_t">Where you work</label>`
+- L8059: `<select class="select" id="py_t">`
+- L8060: `<label for="py_p">Monthly pay before deductions (₹)</label>`
+- L8060: `<input class="input" id="py_p" type="number" inputmode="numeric" min="5000" max="500000" placeholder="e.g. 28000">`
+- L8072: `<textarea class="textarea" id="mq" style="margin-top:10px" placeholder="e.g. Should I do a sports physio certification before or after graduating?">`
+- L8075: `<input class="input" id="ma_'+q.id+'" placeholder="Answer as a mentor">`
+- L8097: `<label for="g_prof">I\'m a</label>`
+- L8097: `<select class="select" id="g_prof" data-g="prof">`
+- L8098: `<label for="g_area">Near</label>`
+- L8098: `<select class="select" id="g_area" data-g="area">`
+- L8146: `<label for="j_phone">Mobile number</label>`
+- L8146: `<input class="input mono" id="j_phone" inputmode="numeric" maxlength="10" autocomplete="tel-national" value="'+esc(J.phone)+'" placeholder="10-digit mobile">`
+- L8147: `<label for="j_email">Email</label>`
+- L8147: `<input class="input" id="j_email" type="email" autocomplete="email" value="'+esc(J.email)+'" placeholder="name@example.com">`
+- L8148: `<label class="check">`
+- L8148: `<input type="checkbox" id="j_consent"'+(J.consent?' checked':'')+'>`
+- L8152: `<label for="j_code">6-digit code</label>`
+- L8152: `<input class="input mono jcode" id="j_code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" value="'+esc(J.code)+'" placeholder="••••••">`
+- L8158: `<label for="j_name">Your full name</label>`
+- L8158: `<input class="input" id="j_name" autocomplete="name" value="'+esc(J.name)+'" placeholder="As on your certificates">`
+- L8161: `<input type="file" id="j_file" accept=".pdf,.doc,.docx,.txt,image/*" hidden>`
+- L8168: `<label class="btn" for="j_file2">Try another file`
+- L8168: `<input type="file" id="j_file2" accept=".pdf,.doc,.docx,.txt,image/*" hidden>`
+- L8170: `<label for="f_prof">Profession</label>`
+- L8170: `<select class="select" id="f_prof">`
+- L8171: `<label for="f_yrs">Experience</label>`
+- L8171: `<select class="select" id="f_yrs">`
+- L8172: `<label for="f_area">Area</label>`
+- L8172: `<select class="select" id="f_area">`
+- L8174: `<label for="f_reg">Registration number</label>`
+- L8174: `<input class="input mono" id="f_reg" value="'+esc(F.reg)+'" placeholder="Not found in your resume">`
+- L8178: `<label for="ab_course">2. Your course</label>`
+- L8178: `<select class="select" id="ab_course">`
+- L8180: `<select class="select sm" id="ab_other" aria-label="Other profession">`
+- L8181: `<label for="ab_area">3. Your area</label>`
+- L8181: `<select class="select" id="ab_area">`
+- L8187: `mhead(esc(x.head`
+
+## Shift operations and analytics
+
+- L8407: `<label>From `
+- L8407: `<input type="date" data-dfk="'+k+'" data-dfe="from" value="'+(f.from||isoD(r.a))+'" max="'+today+'">`
+- L8407: `<label>To `
+- L8407: `<input type="date" data-dfk="'+k+'" data-dfe="to" value="'+(f.to||isoD(r.b))+'" max="'+today+'">`
+- L8427: `mhead('How shifts are confirmed and cancelled','The same rules for everyone, so wards stay covered and people get paid fairly.'`
+- L8439: `mhead('Decline '+esc(p.short`
+- L8445: `mhead('Cancel '+esc(p.short`
+- L8466: `mhead(why?'Book this shift':'Request this shift',esc(cleanOrg(o)`
+- L8473: `mhead('Withdraw your request?',esc(s.title`
+- L8476: `mhead('Cancel this shift?',esc(s.title`
+- L8489: `mhead('Mark '+esc(p.short`
+- L8493: `mhead('Cancel this shift?',esc(s.title`
+- L8770: `<label for="sf_rto">Report to</label>`
+- L8770: `<input class="input" id="sf_rto" placeholder="e.g. Sister in charge, ICU">`
+- L8770: `<label for="sf_rwh">Where</label>`
+- L8770: `<input class="input" id="sf_rwh" placeholder="e.g. Block B, 2nd floor">`
+- L8770: `<label for="sf_rdr">Dress</label>`
+- L8770: `<select class="select" id="sf_rdr">`
+- L8770: `<label for="sf_rno">Note (optional)</label>`
+- L8770: `<input class="input" id="sf_rno" placeholder="e.g. Use the staff entrance after 8 pm">`
+- L8790: `mhead('How was '+esc(name`
+- L8790: `<label for="rnote">Anything the Fale team should know? <span class="muted">(private)</span></label>`
+- L8790: `<textarea class="textarea" id="rnote" rows="2" placeholder="Optional">`
+- L8815: `mhead('Dispute '+esc(p.short`
+- L8816: `<label for="dph">Hours actually worked</label>`
+- L8816: `<input class="input" id="dph" type="number" min="0" max="'+s.hours+'" step="0.5" value="'+s.hours+'">`
+- L8816: `<label for="dpn">Details for '+esc(p.short)+' and the Fale team</label>`
+- L8816: `<textarea class="textarea" id="dpn" rows="2" placeholder="e.g. Left at 1 pm, two hours before the end">`
+- L8827: `mhead('Tell us your side',esc(s.title`
+- L8827: `<label for="ddn">What happened?</label>`
+- L8827: `<textarea class="textarea" id="ddn" rows="3" placeholder="e.g. I stayed until 3 pm; the sister in charge signed me out">`
+- L8837: `mhead('Get your pay now','Sent by IMPS/UPI, 24×7. Usually in your account within minutes.'`
+- L8850: `mhead('Your check-in QR','Print it and stick it at the nursing station or reception. Shift staff scan it when they arrive.'`
+- L8856: `mhead('Check in at '+esc(cleanOrg(o)`
+- L8857: `<label for="ckc">'+(canScan?'Or type':'Type')+' the 6-letter code under the QR</label>`
+- L8857: `<input class="input mono ckin" id="ckc" maxlength="6" autocomplete="off" autocapitalize="characters" placeholder="e.g. K7Q2M9">`
+- L8877: `mhead('Running late?','The hospital sees this straight away, so they can plan.'`
+- L8880: `mhead('How to report',esc(s.title`
+
+## Groups, location, agreements, later onboarding
+
+- L8946: `mhead('What the badges mean','Every badge is checked by a person at The Fale. Nobody can buy one.'`
+- L8956: `<label for="h_group">Part of a hospital group? <span class="muted">(optional)</span></label>`
+- L8956: `<input class="input" id="h_group" data-f="group" list="h_grpl" autocomplete="off" value="'+esc(f.group||'')+'" placeholder="e.g. Manipal Hospitals, Max Healthcare">`
+- L8957: `<label for="h_branch">Branch name <span class="muted">(if part of a group)</span></label>`
+- L8957: `<input class="input" id="h_branch" data-f="branch" value="'+esc(f.branch||'')+'" placeholder="e.g. Whitefield">`
+- L8968: `mhead('Add a branch',esc(g.name)`
+- L8968: `<label for="ab_bn">Branch name</label>`
+- L8968: `<input class="input" id="ab_bn" placeholder="e.g. Hebbal">`
+- L8968: `<label for="ab_ba">Area</label>`
+- L8968: `<select class="select" id="ab_ba">`
+- L8985: `<input class="input" id="locq" placeholder="Search any city in India, or a Bengaluru area" autocomplete="off">`
+- L9002: `<label class="crz">'+ic('search',15)+'`
+- L9002: `<input type="range" id="crz" min="1" max="4" step="0.01" value="1" aria-label="Zoom">`
+- L9040: `mhead('Checks for '+esc(p.name`
+- L9050: `mhead((a.offer?'Edit the offer':'Make an offer'`
+- L9051: `<label for="of_r">Role</label>`
+- L9051: `<input class="input" id="of_r" value="'+esc(f.role||r.title)+'">`
+- L9051: `<label for="of_m">Monthly salary (₹, gross)</label>`
+- L9051: `<input class="input" type="number" id="of_m" value="'+m+'">`
+- L9052: `<label for="of_j">Joining date</label>`
+- L9052: `<input class="input" type="date" id="of_j" value="'+(f.join||isoD(jd))+'">`
+- L9052: `<label for="of_t">Shift pattern</label>`
+- L9052: `<select class="select" id="of_t">`
+- L9053: `<label for="of_p">Probation</label>`
+- L9053: `<select class="select" id="of_p">`
+- L9053: `<label for="of_b">Respond by</label>`
+- L9053: `<input class="input" type="date" id="of_b" value="'+(f.respondBy||isoD(rb))+'">`
+- L9054: `<label for="of_n">Benefits and notes</label>`
+- L9054: `<textarea class="textarea" id="of_n" rows="2" placeholder="e.g. PF, ESI, free meals on shift, accommodation help">`
+- L9076: `mhead('Accept this offer?',esc(cleanOrg(o))`
+- L9079: `mhead('Decline this offer?',esc(cleanOrg(o))`
+- L9083: `mhead('Ask about the offer',esc(cleanOrg(o))`
+- L9083: `<textarea class="textarea" id="oaq" rows="3" placeholder="e.g. Is accommodation available? Can I join on the 20th?">`
+- L9086: `mhead('Answer '+esc(prof(a.profileId).short`
+- L9086: `<textarea class="textarea" id="orq" rows="3" placeholder="Your answer">`
+- L9104: `mhead('Shift done. Thank you!',esc(s.title`
+- L9119: `<label for="nm_v">Full name</label>`
+- L9119: `<input class="input" id="nm_v" value="'+esc(p.name)+'" autocomplete="name">`
+- L9125: `mhead('Edit hospital details',o.verified?'Changing the hospital name is checked by the Fale team first.':''`
+- L9125: `<label for="he_n">Hospital name</label>`
+- L9125: `<input class="input" id="he_n" value="'+esc(o.name.replace(/^Sample — /,''))+'">`
+- L9126: `<label for="h_group">Hospital group</label>`
+- L9126: `<input class="input" id="h_group" list="he_grpl" value="'+esc(g?g.name:'')+'" placeholder="e.g. Manipal Hospitals">`
+- L9126: `<label for="he_b">Branch name</label>`
+- L9126: `<input class="input" id="he_b" value="'+esc(o.branch||'')+'" placeholder="e.g. Whitefield">`
+- L9127: `<label for="h_area">Area</label>`
+- L9127: `<select class="select" id="h_area">`
+- L9127: `<label for="he_c">Contact person</label>`
+- L9127: `<input class="input" id="he_c" value="'+esc(o.contact||'')+'">`
+- L9193: `<label for="'+id+'_c">6-digit signing code</label>`
+- L9193: `<input class="input mono jcode" id="'+id+'_c" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="••••••">`
+- L9219: `mhead('Service agreement','Plain terms. Accept once for '+esc(cleanOrg(o)`
+- L9220: `<label class="check" style="margin-top:14px">`
+- L9220: `<input type="checkbox" id="v6ck">`
+- L9252: `<label for="h_'+id+'">'+l+(req?' <span class="req">*</span>':'')+'</label>`
+- L9252: `<input class="input" id="h_'+id+'" data-f="'+id+'" type="'+(t||'text')+'" value="'+esc(v)+'" placeholder="'+esc(ph||'')+'">`
+- L9253: `<label for="h_'+id+'">'+l+' <span class="req">*</span></label>`
+- L9253: `<select class="select" id="h_'+id+'" data-f="'+id+'">`
+- L9271: `<label class="check v6ck">`
+- L9271: `<input type="checkbox" id="h_agree"'+(f.agree?' checked':'')+'>`
+- L9307: `mhead(esc(x.head`
+
+## Registration, profile and community extensions
+
+- L9378: `mhead('How to register with NCAHP','Provisional registration for healthcare professionals already working'`
+- L9382: `mhead('Your NCAHP registration','Hospitals see the status, never the file.'`
+- L9383: `<label for="v7st">State you registered in</label>`
+- L9383: `<select class="select" id="v7st">`
+- L9384: `<label for="v7ack">Acknowledgement number (if you have it)</label>`
+- L9384: `<input class="input mono" id="v7ack" value="'+esc(rg.ack||'')+'" placeholder="From the council portal">`
+- L9385: `<label for="v7no">Registration number</label>`
+- L9385: `<input class="input mono" id="v7no" value="'+esc(rg.no||'')+'" placeholder="'+(rg.type==='provisional'?'PR-IND-KA-03-2026-…':'As printed on the certificate')+'">`
+- L9386: `<label for="v7ex">Valid till</label>`
+- L9386: `<input class="input" id="v7ex" type="date" value="'+esc(rg.expires||'')+'">`
+- L9387: `<label class="v7file">`
+- L9387: `<input type="file" id="v7f" accept="image/*,.pdf">`
+- L9421: `<label for="w_org">New hospital or clinic</label>`
+- L9421: `<input class="input" id="w_org" placeholder="Name of the place">`
+- L9421: `<label for="w_role">Your role there</label>`
+- L9421: `<input class="input" id="w_role" value="'+esc(profLabel(p.profession))+'">`
+- L9421: `<label for="w_from">Started in</label>`
+- L9421: `<input class="input" id="w_from" type="month" value="'+dayISO(0).slice(0,7)+'">`
+- L9423: `mhead('Update my work',mode?'':'What changed?'`
+- L9455: `mhead('My Fale Resume','Built from your profile. Change the profile and this changes too.'`
+- L9462: `mhead('Need help?','A person at The Fale answers, 9 am to 8 pm.'`
+- L9486: `<label class="btn sm v7up">'+ic('upload',14)+'Read a notice (PDF)`
+- L9486: `<input type="file" id="v7pdf" accept=".pdf,application/pdf" hidden>`
+- L9499: `mhead(isNew?'New regulation alert':'Edit alert','Read it once as a candidate would. Short words, one action.'`
+- L9500: `<label for="r_t">Title (shown in bold)</label>`
+- L9500: `<input class="input" id="r_t" maxlength="70" value="'+esc(r.title)+'">`
+- L9500: `<label for="r_m">Message (one or two lines)</label>`
+- L9500: `<textarea class="input" id="r_m" rows="3" maxlength="220">`
+- L9502: `<label>`
+- L9502: `<input type="checkbox" data-g="'+g[0]+'"'+(r.groups.indexOf(g[0])>`
+- L9503: `<label>`
+- L9503: `<input type="checkbox" data-w="'+k+'"'+(r.who.indexOf(k)>`
+- L9504: `<label for="r_d">Deadline (if any)</label>`
+- L9504: `<input class="input" id="r_d" type="date" value="'+esc(r.deadline||'')+'">`
+- L9504: `<label for="r_st">States (blank = all)</label>`
+- L9504: `<input class="input" id="r_st" value="'+esc((r.states||[]).join(', '))+'" placeholder="e.g. Karnataka, Kerala">`
+- L9505: `<label for="r_s">Source (for the team)</label>`
+- L9505: `<input class="input" id="r_s" value="'+esc(r.src||'')+'">`
+- L9607: `mhead('Choose your language','Buttons and menus change. Job posts stay as the hospital wrote them.'`
+- L9635: `mhead('Raise a ticket','For a problem the Fale team must fix. For a quick question, ask Ally.'`
+- L9636: `<label class="lbl">What is it about?</label>`
+- L9637: `<label class="lbl" for="tk_m" style="margin-top:14px">Tell us what happened</label>`
+- L9637: `<textarea class="input" id="tk_m" rows="4" maxlength="600" placeholder="Example: I worked the night shift on Monday and the money has not come.">`
+- L9653: `<textarea class="input" rows="2" id="tkr_'+h.id+'" placeholder="Write the reply the candidate will see">`
+- L9745: `mhead('Basic details','Hospitals see your gender and an age band. They never see your date of birth.'`
+- L9746: `<label for="b_name">Full name, as on your ID</label>`
+- L9746: `<input class="input" id="b_name" value="'+esc(p.name||'')+'" autocomplete="name">`
+- L9747: `<label for="b_dob">Date of birth</label>`
+- L9747: `<input class="input" type="date" id="b_dob" max="'+v8DobMax()+'" min="1945-01-01" value="'+esc(p.dob||'')+'">`
+- L9748: `<label for="b_state">Home state</label>`
+- L9748: `<select class="select" id="b_state">`
+- L9751: `<label for="b_en">Emergency contact name</label>`
+- L9751: `<input class="input" id="b_en" value="'+esc(em.name||'')+'" placeholder="Optional">`
+- L9751: `<label for="b_ep">Their mobile</label>`
+- L9751: `<input class="input" id="b_ep" inputmode="numeric" maxlength="10" value="'+esc(em.phone||'')+'" placeholder="Optional">`
+- L9767: `<label for="j_dob">Date of birth</label>`
+- L9767: `<input class="input" type="date" id="j_dob" max="'+v8DobMax()+'" min="1945-01-01" value="'+esc(J.dob||'')+'">`
+- L9858: `mhead('My Fale Resume','Built from your profile. Fix anything here and the resume updates.'`
+- L9865: `mhead('Share your resume','Send it on WhatsApp, or copy it for email and job forms.'`
+- L9865: `<textarea class="input" id="v8sel" rows="8" readonly style="margin-top:12px;font-size:12.5px">`
+- L9867: `mhead('Copy your resume','Select all and copy.'`
+- L9867: `<textarea class="input" rows="12" readonly id="v8sel">`
+- L9869: `mhead('Contact on your resume','Hospitals see these only after you accept them or they unlock your profile.'`
+- L9869: `<label for="c_ph">Mobile</label>`
+- L9869: `<input class="input" id="c_ph" inputmode="numeric" maxlength="10" value="'+esc(String(p.phone||'').replace(/^\+91\s*/,'').replace(/\s/g,''))+'">`
+- L9869: `<label for="c_em">Email</label>`
+- L9869: `<input class="input" id="c_em" type="email" value="'+esc(p.email||'')+'">`
+- L9872: `mhead('Education','Your main qualification, as on the certificate.'`
+- L9872: `<label for="e_q">Qualification</label>`
+- L9872: `<input class="input" id="e_q" list="e_ql" value="'+esc(p.qual||'')+'" placeholder="Start typing: B.Sc Nursing, DMLT, BPT">`
+- L9873: `<label for="e_c">College</label>`
+- L9873: `<input class="input" id="e_c" value="'+esc(p.college||'')+'">`
+- L9873: `<label for="e_u">University or board</label>`
+- L9873: `<input class="input" id="e_u" value="'+esc(p.univ||'')+'" placeholder="e.g. RGUHS">`
+- L9873: `<label for="e_y">Year of passing</label>`
+- L9873: `<input class="input" id="e_y" inputmode="numeric" maxlength="4" value="'+esc(p.year||'')+'">`
+- L9876: `mhead('Skills','One per line. Keep the ones a hospital would look for.'`
+- L9876: `<textarea class="input" id="s_t" rows="8">`
+- L9879: `mhead('Summary','Three or four short lines at the top of your resume.'`
+- L9879: `<textarea class="input" id="m_t" rows="6" maxlength="500">`
+- L9883: `<select class="select" id="'+id+'">`
+- L9884: `<select class="select" id="'+id+'">`
+- L9885: `mhead(i>-1?'Edit job':'Add a job','New jobs show as "Not yet verified" until the Fale team checks them.'`
+- L9885: `<label for="x_o">Hospital or lab</label>`
+- L9885: `<input class="input" id="x_o" value="'+esc(e.org||'')+'" placeholder="Full name and area">`
+- L9886: `<label for="x_r">Your role</label>`
+- L9886: `<input class="input" id="x_r" value="'+esc(e.role||'')+'" placeholder="'+esc(profLabel(p.profession))+'">`
+- L9886: `<label for="x_d">Department</label>`
+- L9886: `<input class="input" id="x_d" value="'+esc(e.dept||'')+'" placeholder="e.g. ICU, OPD">`
+- L9888: `<label class="v8chk">`
+- L9888: `<input type="checkbox" id="x_cur"'+(e.cur?' checked':'')+'>`
+- L9890: `<label for="x_du">What you did there, one per line (up to 4)</label>`
+- L9890: `<textarea class="input" id="x_du" rows="4" placeholder="Cared for 2–3 ventilated patients per shift&#10;Trained new nurses on infusion pumps">`
+- L9934: `<textarea class="input" id="v8ap" rows="3" maxlength="500" placeholder="Tell us why this should be reviewed">`
+- L9946: `<input class="input" id="v8pq" type="search" placeholder="Search name, mobile or email" value="'+esc(V8A.q)+'" aria-label="Search people">`
+- L9950: `mhead('Manage '+esc(kind==='org'?cleanOrg(x):x.name`
+- L9952: `<label for="a_why">Reason</label>`
+- L9952: `<select class="select" id="a_why">`
+- L9953: `<label for="a_note">Note (the person sees this)</label>`
+- L9953: `<textarea class="input" id="a_note" rows="2" maxlength="240">`
+- L9964: `mhead('Unlocked: '+esc(p.name`
+- L10023: `mhead(mine?'My Huddle profile':'Profile',''`
+- L10035: `mhead('Your headline','One line under your name in Huddle and on your resume.'`
+- L10035: `<input class="input" id="hl_t" maxlength="80" value="'+esc(p.headline||auto)+'">`
+- L10035: `<label for="hl_b">About you (optional)</label>`
+- L10035: `<textarea class="input" id="hl_b" rows="3" maxlength="240">`
+- L10041: `mhead('Your followers',fol.length+' follow you. Remove anyone you do not want.'`
+- L10049: `mhead('My Huddle','Everything you posted. Edit or delete any time.'`
+- L10061: `mhead('Edit post','Ally checks it again. People will see "edited".'`
+- L10061: `<textarea class="input" id="pe_t" rows="7" maxlength="1500">`
+- L10067: `mhead('Your post',''`
+- L10108: `mhead('Share your achievement','Post it on LinkedIn or send it on WhatsApp.'`
+- L10109: `<textarea class="input" id="sh_t" rows="4" style="margin-top:12px">`
+- L10137: `mhead('Refer and earn','You earn only after your friend really works through The Fale.'`
+- L10147: `<label>First shift (₹)`
+- L10147: `<input class="input" id="rc_s" inputmode="numeric" value="'+cfg.shift+'">`
+- L10147: `<label>Placement (₹)`
+- L10147: `<input class="input" id="rc_p" inputmode="numeric" value="'+cfg.place+'">`
+- L10147: `<label>Max per month`
+- L10147: `<input class="input" id="rc_c" inputmode="numeric" value="'+cfg.cap+'">`
+- L10151: `<label>Referring hospital`
+- L10151: `<select class="select" id="rc_o">`
+- L10151: `<label>Credits`
+- L10151: `<input class="input" id="rc_n" inputmode="numeric" value="3">`
+- L10154: `<label for="j_ref">Referral code (optional)</label>`
+- L10154: `<input class="input" id="j_ref" maxlength="8" autocapitalize="characters" value="'+esc(J.ref||'')+'" placeholder="From a friend on The Fale">`
+- L10215: `mhead('Help','Quick question? Ask Ally. Something the Fale team must fix? Raise a ticket.'`
+- L10227: `<label class="lbl" for="tk_l" style="margin-top:14px">Which one is it about? <span class="muted" style="font-weight:500">(optional)</span></label>`
+- L10227: `<select class="select" id="tk_l">`
+- L10228: `mhead('Raise a ticket','A person at The Fale reads it. You get a reply here and a bell note.'`
+- L10229: `<label class="lbl">What is it about?</label>`
+- L10231: `<label class="lbl" for="tk_m" style="margin-top:14px">Tell us what happened</label>`
+- L10231: `<textarea class="input" id="tk_m" rows="4" maxlength="800" placeholder="'+(CTX.role==='hospital'?'Example: The nurse booked for Monday night did not arrive.':'Example: I worked the night shift on Mond`
+- L10232: `<label class="btn sm" for="tk_f">'+ic('camera',15)+'Add a screenshot or photo`
+- L10232: `<input type="file" id="tk_f" accept="image/*" hidden>`
+- L10247: `mhead(esc(h.no`
+- L10252: `<textarea class="input" id="tk_r" rows="2" maxlength="800" placeholder="'+(team?'Write the reply they will see':'Add more details')+'">`
+- L10252: `<label class="btn sm quiet" for="tk_rf" aria-label="Attach photo">'+ic('camera',15)+'`
+- L10252: `<input type="file" id="tk_rf" accept="image/*" hidden>`
+
+## Later portal, hiring and shift overrides
+
+- L10593: `mhead('How do you want to hire?','You can switch a self-hire job to The Fale later.'`
+- L10634: `mhead('Edit job','People who applied are told if the pay, place or joining time changes.'`
+- L10634: `<label for="e_t">Job title</label>`
+- L10634: `<input class="input" id="e_t" maxlength="80" value="'+esc(r.title)+'">`
+- L10635: `<label for="e_n">Openings</label>`
+- L10635: `<input class="input" id="e_n" type="number" min="1" max="50" value="'+(r.openings||1)+'">`
+- L10635: `<label for="e_a">Area</label>`
+- L10635: `<select class="select" id="e_a">`
+- L10636: `<label for="e_lo">Pay from (₹/month)</label>`
+- L10636: `<input class="input" id="e_lo" type="number" step="500" value="'+(r.budgetMin||'')+'">`
+- L10636: `<label for="e_hi">Pay up to (₹/month)</label>`
+- L10636: `<input class="input" id="e_hi" type="number" step="500" value="'+(r.budgetMax||'')+'">`
+- L10637: `<label for="e_j">Join within (days)</label>`
+- L10637: `<input class="input" id="e_j" type="number" min="0" max="120" value="'+(r.joinWithin==null?'':r.joinWithin)+'">`
+- L10637: `<label for="e_y">Minimum experience (years)</label>`
+- L10637: `<input class="input" id="e_y" type="number" min="0" max="30" value="'+(r.minYears||0)+'">`
+- L10638: `<label for="e_s">Shift and anything else</label>`
+- L10638: `<textarea class="input" id="e_s" rows="2" maxlength="300" placeholder="e.g. Rotational shifts, food provided">`
+- L10669: `mhead('Send '+esc(p.name`
+- L10669: `<label class="v8chk">`
+- L10669: `<input type="checkbox" id="sd_ok">`
+- L10669: `<label for="sd_n">Note for the hospital (optional)</label>`
+- L10669: `<textarea class="input" id="sd_n" rows="2" maxlength="240" placeholder="e.g. Strong in ortho rehab, can join in 10 days">`
+- L10680: `<label class="v8chk">`
+- L10680: `<input type="checkbox" id="of_ok">`
+- L10697: `<label class="v9jl">`
+- L10697: `<input type="checkbox" data-act="v9jl" data-id="'+a.id+'" data-i="'+i+'"'+(a.jl[i]?' checked':'')+'>`
+- L10721: `mhead('Mark '+esc(p.name`
+- L10721: `<label for="h_join">Joining date</label>`
+- L10721: `<input class="input" type="date" id="h_join" value="'+(a.offer&&a.offer.join||dayISO(0))+'">`
+- L10721: `<label for="h_ctc">Yearly salary (₹)</label>`
+- L10721: `<input class="input" type="number" id="h_ctc" value="'+est+'">`
+- L10730: `mhead('New joining date','We\'ll tell the hospital.'`
+- L10730: `<label for="mv_d">Joining date</label>`
+- L10730: `<input class="input" type="date" id="mv_d" min="'+dayISO(0)+'" value="'+dayISO(7)+'">`
+- L10762: `mhead('This job isn\'t a match yet',esc(r.title)`
+- L10769: `<label for="j_dob">Date of birth</label>`
+- L10769: `<input class="input" type="date" id="j_dob" max="'+v8DobMax()+'" min="1945-01-01" value="'+esc(J.dob||(J.found&&J.found.dob)||'')+'">`
+- L10776: `mhead('Delete my account','This can\'t be undone.'`
+- L10777: `<label for="dl_t">Type DELETE to confirm</label>`
+- L10777: `<input class="input" id="dl_t" autocomplete="off">`
+- L10851: `mhead('Post',''`
+- L10882: `mhead('Huddle rules','Short, so everyone remembers them.'`
+- L10885: `mhead(CTX.role==='hospital'?'Share in Huddle':'Ask or share','Ally checks every post and photo before it goes live.'`
+- L10893: `<input class="input" id="qf_'+q.id+'" placeholder="Reply to the mentor" maxlength="500"'+(turns>`
+- L10894: `<input class="input" id="ma_'+q.id+'" placeholder="'+(ans?'Add to the answer':'Answer as a mentor')+'" maxlength="800">`
+- L10898: `<textarea class="textarea" id="mq" rows="2" placeholder="e.g. Should I do a sports physio certification before or after graduating?">`
+- L10939: `mhead('Pay the overdue invoice first','New job posts, unlocks and shifts are paused until it is paid.'`
+- L10951: `mhead('Repeat this shift?','Post the same shift every week, so you don\'t have to do it again.'`
+- L10956: `mhead('Your signed agreement','Keep a copy for your records.'`
+- L10969: `mhead(n+' star'+(n>1?'s':''`
+- L10984: `<select class="select" id="cx_n" aria-label="Certificate">`
+- L10984: `<input class="input" type="date" id="cx_d" aria-label="Valid till" min="'+dayISO(-3650)+'">`
+- L10985: `mhead('Certificates','We remind you before they expire.'`
+- L11001: `<select class="select" id="ff_p" aria-label="Profession">`
+- L11001: `<select class="select" id="ff_a" aria-label="Area">`
+- L11077: `mhead(esc(p.name`
+- L11106: `mhead(kind==='followers'?'Followers':'Following',list.length+' '+(kind==='followers'?'follow':'followed')`
+- L11107: `mhead('Your Huddle profile','A short headline and up to 3 topics people can ask you about.'`
+- L11107: `<label for="we_h">Headline</label>`
+- L11107: `<input class="input" id="we_h" maxlength="70" value="'+esc(p.headline||(window.v8Headline?v8Headline(p):''))+'">`
+- L11107: `<label for="we_a">Ask me about (comma separated)</label>`
+- L11107: `<input class="input" id="we_a" maxlength="90" value="'+esc((p.askMe||[]).join(', '))+'" placeholder="e.g. ICU care, ventilators, night shifts">`
+- L11131: `mhead('How do you want to hire?','You can hand a self-hire job to The Fale later.'`
+- L11137: `mhead('The Fale finds for you','Our team starts today.'`
+- L11179: `mhead('Edit shift',esc(s.title)`
+- L11180: `<label for="se_d">Date</label>`
+- L11180: `<input class="input" id="se_d" type="date" value="'+s.date+'"'+dis+'>`
+- L11181: `<label for="se_r">Pay per hour (₹)</label>`
+- L11181: `<input class="input" id="se_r" type="number" min="'+(booked?s.rate:50)+'" value="'+s.rate+'">`
+- L11182: `<label for="se_s">Starts</label>`
+- L11182: `<input class="input" id="se_s" type="time" value="'+s.start+'"'+dis+'>`
+- L11183: `<label for="se_e">Ends</label>`
+- L11183: `<input class="input" id="se_e" type="time" value="'+s.end+'"'+dis+'>`
+- L11184: `<label for="se_n">People needed</label>`
+- L11184: `<input class="input" id="se_n" type="number" min="'+Math.max(1,bk.length)+'" value="'+s.slots+'"'+(late&&booked?' disabled':'')+'>`
+- L11185: `<label for="se_no">Notes for the professional</label>`
+- L11185: `<textarea class="input" id="se_no" rows="2" placeholder="Dress code, who to ask for, where to report">`
+- L11203: `mhead('The hospital changed your shift',esc(cleanOrg(o)`
+- L11240: `mhead('Go to'`
+- L11374: `mhead('Compare with an agency','Agencies usually charge a share of the first year\'s salary. Pick what yours charged.'`
+
+## Hospital profile and dashboard extensions
+
+- L11427: `<input type="hidden" data-f="multi" id="h_multi" value="'+(multi?'yes':'no')+'">`
+- L11428: `<label for="h_group">Your group or chain name</label>`
+- L11428: `<input class="input" id="h_group" data-f="group" list="h_grpl" autocomplete="off" value="'+esc(f.group||'')+'" placeholder="Type to search, or add a new one">`
+- L11429: `<label for="h_branch">This branch</label>`
+- L11429: `<input class="input" id="h_branch" data-f="branch" value="'+esc(f.branch||'')+'" placeholder="e.g. Whitefield">`
+- L11442: `<select class="select" id="gm_'+g.id+'" aria-label="Merge into">`
+- L11445: `<input class="input" id="ab_n" placeholder="Branch name, e.g. HSR Layout">`
+- L11445: `<select class="select" id="ab_a" aria-label="Area">`
+- L11445: `<input class="input" id="ab_p" inputmode="tel" placeholder="Branch HR phone">`
+- L11460: `<label class="v47add">'+ic('plus',20)+'<span>Add photo</span>`
+- L11460: `<input type="file" accept="image/*" id="hp_gal" hidden>`
+- L11463: `<label for="hp_t">Type</label>`
+- L11463: `<select class="select" id="hp_t">`
+- L11463: `<label for="hp_b">Beds</label>`
+- L11463: `<input class="input" id="hp_b" type="number" min="0" value="'+esc(o.beds||'')+'">`
+- L11464: `<label for="hp_ad">Full address</label>`
+- L11464: `<textarea class="input" id="hp_ad" rows="2">`
+- L11466: `<label for="hp_about">Description <span class="muted" id="hp_cnt">'+(o.about||'').length+'/300</span></label>`
+- L11466: `<textarea class="input" id="hp_about" rows="3" maxlength="300">`
+- L11467: `<label for="hp_sp">Specialities (comma separated)</label>`
+- L11467: `<input class="input" id="hp_sp" value="'+esc((o.specs||[]).join(', '))+'" placeholder="e.g. Cardiology, Orthopaedics, ICU">`
+- L11468: `<label class="check">`
+- L11468: `<input type="checkbox" data-accr="'+a+'"'+(st?' checked':'')+'>`
+- L11470: `<label class="check">`
+- L11470: `<input type="checkbox" data-perk="'+esc(p)+'"'+((o.perks||[]).indexOf(p)>`
+- L11471: `<label for="hp_tm">Usual shift timings</label>`
+- L11471: `<input class="input" id="hp_tm" value="'+esc(o.timings||'')+'" placeholder="e.g. 8 am–2 pm, 2–8 pm, 8 pm–8 am">`
+- L11471: `<label for="hp_dc">Dress code</label>`
+- L11471: `<input class="input" id="hp_dc" value="'+esc(o.dress||'')+'" placeholder="e.g. Scrubs provided, white coat for doctors">`
+- L11473: `<label for="hp_rn">Recruiter name</label>`
+- L11473: `<input class="input" id="hp_rn" value="'+esc(o.recruiter||o.contact||'')+'">`
+- L11473: `<label for="hp_rp">Recruiter phone</label>`
+- L11473: `<input class="input" id="hp_rp" inputmode="tel" value="'+esc(o.recPhone||'')+'">`
+- L11473: `<label for="hp_re">Recruiter email</label>`
+- L11473: `<input class="input" id="hp_re" type="email" value="'+esc(o.recEmail||'')+'">`
+- L11476: `<input class="input" id="ti_n" placeholder="Name">`
+- L11476: `<input class="input" id="ti_p" inputmode="tel" placeholder="Phone">`
+- L11476: `<select class="select" id="ti_r" aria-label="Role">`
+- L11478: `<label for="hp_gst">GSTIN</label>`
+- L11478: `<input class="input" id="hp_gst" value="'+esc(o.gstin||'')+'"'+(o.verified&&o.gstin&&!o.gstinUnlock?' readonly':'')+'>`
+- L11478: `<label for="hp_ie">Invoice email</label>`
+- L11478: `<input class="input" id="hp_ie" type="email" value="'+esc(o.invEmail||'')+'">`
+- L11479: `<label for="hp_ba">Billing address</label>`
+- L11479: `<textarea class="input" id="hp_ba" rows="2">`
+- L11671: `mhead('Go to'`
+- L11676: `mhead('Your branches','Open shifts today in each branch'`
+
+## Availability, interviews, job and offer fields
+
+- L11717: `<select class="select v50ts" data-id="'+id+'">`
+- L11721: `mhead('When are you free?','Set the hours you can work. A shift reaches you only if it fits inside them.'`
+- L11773: `mhead((a.iv&&again?'Change the interview':'Schedule an interview'`
+- L11775: `<label for="iv_d">Date</label>`
+- L11775: `<input class="input" type="date" id="iv_d" min="'+dayISO(0)+'" value="'+d0+'">`
+- L11775: `<label for="iv_t">Time</label>`
+- L11775: `<input class="input" type="time" id="iv_t" value="'+t0+'">`
+- L11776: `<label for="iv_ad">Address</label>`
+- L11776: `<textarea class="textarea" id="iv_ad" rows="2">`
+- L11776: `<label for="iv_ask">Ask for <small class="muted">optional</small></label>`
+- L11776: `<input class="input" id="iv_ask" value="'+esc(ask)+'" placeholder="e.g. Nursing office, 2nd floor">`
+- L11778: `<label for="iv_l">Meeting link</label>`
+- L11778: `<input class="input" id="iv_l" type="url" value="'+esc(lb==='own'?link:'')+'" placeholder="Google Meet, Zoom or Teams link">`
+- L11798: `mhead('Interview outcome',esc(p.short`
+- L11803: `<label for="oc_n">Notes <small class="muted">only your team and The Fale see this</small></label>`
+- L11803: `<textarea class="textarea" id="oc_n" rows="2">`
+- L11860: `<select class="select" id="'+id+'">`
+- L11860: `<input class="input" type="number" min="1" max="36" id="'+id+'_n" value="'+(custom?parseInt(v,10)||'':'')+'">`
+- L11861: `mhead((a.offer?'Edit the offer':'Make an offer'`
+- L11862: `<label for="of_r">Role</label>`
+- L11862: `<input class="input" id="of_r" value="'+esc(f.role||r.title)+'">`
+- L11862: `<label for="of_m">Monthly salary (₹, '+((r.payType||'gross')==='inhand'?'in-hand':'gross')+')</label>`
+- L11862: `<input class="input" type="number" id="of_m" value="'+m+'">`
+- L11863: `<label for="of_j">Joining date</label>`
+- L11863: `<input class="input" type="date" id="of_j" value="'+(f.join||isoD(jd))+'">`
+- L11863: `<label for="of_t">Shift pattern</label>`
+- L11863: `<select class="select" id="of_t">`
+- L11864: `<label for="of_p">Probation</label>`
+- L11864: `<label for="of_nt">Notice period</label>`
+- L11865: `<label for="of_b">Respond by</label>`
+- L11865: `<input class="input" type="date" id="of_b" value="'+(f.respondBy||isoD(rb))+'">`
+- L11865: `<label for="of_rt">Report on day one at</label>`
+- L11865: `<input class="input" type="time" id="of_rt" value="'+(f.report||'09:00')+'">`
+- L11866: `<label for="of_ad">Where to report</label>`
+- L11866: `<input class="input" id="of_ad" value="'+esc(f.reportAddr||o.address||(cleanOrg(o)+', '+o.area))+'">`
+- L11867: `<label for="of_me">Person to meet <small class="muted">optional</small></label>`
+- L11867: `<input class="input" id="of_me" value="'+esc(f.meet||o.contact||'')+'" placeholder="e.g. Ms. Rekha, Nursing Superintendent">`
+- L11868: `<label class="v8chk">`
+- L11868: `<input type="checkbox" checked data-doc="'+esc(d)+'">`
+- L11868: `<input class="input" id="of_dn" placeholder="Add another document">`
+- L11869: `<label for="of_n">Benefits and notes</label>`
+- L11869: `<textarea class="textarea" id="of_n" rows="2" placeholder="e.g. PF, ESI, free meals on shift, accommodation help">`
+- L11871: `<label class="v8chk">`
+- L11871: `<input type="checkbox" checked data-doc="'+esc(v)+'">`
+- L11888: `<label class="v9jl">`
+- L11888: `<input type="checkbox" data-act="v9jl" data-id="'+a.id+'" data-i="'+i+'"'+(a.jl[i]?' checked':'')+'>`
+- L11902: `<label for="v50tm">Timings <small class="muted">optional</small></label>`
+- L11902: `<input class="input" id="v50tm" data-k="timing" value="'+esc(f.timing||'')+'" placeholder="e.g. 8 AM – 8 PM, 12-hour shifts">`
+- L11904: `<label for="v50q">Minimum qualification</label>`
+- L11904: `<input class="input" id="v50q" data-k="minQual" value="'+esc(f.minQual||V50QUAL[f.profession]||'')+'" placeholder="e.g. GNM or BSc Nursing">`
+- L11944: `<textarea class="input" id="tk_rn" rows="2" maxlength="400" placeholder="Anything we could do better? (optional)" style="display:none">`
+- L11954: `mhead('Ask for another time','The hospital gets your message and sends a new time.'`
+- L11954: `<textarea class="textarea" id="ak_n" rows="2" style="margin-top:10px" placeholder="Times that work for you (optional)">`
+
+## V53 and routing
+
+- L12071: `mhead('Where you want to work','Hospitals near these areas see you first.'`

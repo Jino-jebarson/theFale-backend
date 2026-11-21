@@ -36,6 +36,9 @@ public class CandidateProfile {
     @Column(nullable = false, length = 50)
     private String city;
 
+    @Column(length = 100)
+    private String locality;
+
     @Column(length = 50)
     private String state;
 
@@ -61,6 +64,9 @@ public class CandidateProfile {
     @Column(name = "expected_graduation_year")
     private Integer expectedGraduationYear;
 
+    @Column(name = "expected_graduation_month", length = 7)
+    private String expectedGraduationMonth;
+
     // Graduate fields
     @Column(length = 50)
     private String profession;
@@ -85,6 +91,12 @@ public class CandidateProfile {
 
     @Column(name = "experience_years", length = 30)
     private String experienceYears;
+
+    @Column(name = "experience_history", columnDefinition = "TEXT")
+    private String experienceHistory;
+
+    @Column(columnDefinition = "TEXT")
+    private String certifications;
 
     @Column(columnDefinition = "TEXT")
     private String bio;
@@ -129,7 +141,7 @@ public class CandidateProfile {
 
     @Builder.Default
     @Column(name = "kyc_status", nullable = false, length = 30)
-    private String kycStatus = "PENDING"; // PENDING, VERIFIED, REJECTED
+    private String kycStatus = "DOCUMENTS_REQUIRED"; // DOCUMENTS_REQUIRED, PENDING, VERIFIED, REJECTED
 
     @Builder.Default
     @Column(name = "is_mentor", nullable = false)

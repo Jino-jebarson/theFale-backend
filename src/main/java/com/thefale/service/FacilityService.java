@@ -46,6 +46,7 @@ public class FacilityService {
     private final UserRepository userRepository;
     private final AuditLogService auditLogService;
     private final ObjectMapper objectMapper;
+    private final AuthService authService;
 
     @Transactional(readOnly = true)
     public FacilityProfile getOrCreateFacilityProfile(CustomUserPrincipal principal) {
@@ -58,6 +59,10 @@ public class FacilityService {
         FacilityProfile facility = facilityProfileRepository.findByUserId(principal.getId())
                 .orElse(FacilityProfile.builder().userId(principal.getId()).build());
 
+        if (facility.getAgreementAcceptedAt() == null && !Boolean.TRUE.equals(request.getAgreementAccepted())) {
+            throw new BadRequestException("Accept and sign the service agreement before completing onboarding.");
+        }
+
         facility.setHospitalName(request.getHospitalName().trim());
         facility.setFacilityType(request.getFacilityType().trim());
         facility.setSize(request.getSize());
@@ -69,7 +74,15 @@ public class FacilityService {
         facility.setAddressLine(request.getAddressLine());
         facility.setBeds(request.getBeds());
         facility.setIcuBeds(request.getIcuBeds());
-        facility.setLicenseNumber(request.getLicenseNumber().trim());
+        facility.setLicenseNumber(request.getLicenseNumber() == null || request.getLicenseNumber().isBlank() ? null : request.getLicenseNumber().trim());
+        facility.setGroupName(request.getGroupName());
+        facility.setBranchName(request.getBranchName());
+        if (Boolean.TRUE.equals(request.getAgreementAccepted())) {
+            authService.verifyFacilityAgreementCode(principal, request.getAgreementOtp());
+            facility.setAgreementAcceptedAt(Instant.now());
+            facility.setAgreementVersion("v53-1");
+            facility.setAgreementAcceptedBy(request.getContactPerson().trim());
+        }
         facility.setGst(request.getGst());
         facility.setNabhNumber(request.getNabhNumber());
         facility.setAccreditationLevel(request.getAccreditationLevel());
@@ -269,6 +282,9 @@ public class FacilityService {
                                 .fileSizeBytes(d.getFileSizeBytes())
                                 .mimeType(d.getMimeType())
                                 .verified(d.isVerified())
+                                .reviewStatus(d.getReviewStatus())
+                                .reviewNotes(d.getReviewNotes())
+                                .reviewedAt(d.getReviewedAt())
                                 .createdAt(d.getCreatedAt())
                                 .build())
                         .collect(Collectors.toList());
@@ -292,6 +308,11 @@ public class FacilityService {
                 .beds(f.getBeds())
                 .icuBeds(f.getIcuBeds())
                 .licenseNumber(f.getLicenseNumber())
+                .groupName(f.getGroupName())
+                .branchName(f.getBranchName())
+                .agreementAcceptedAt(f.getAgreementAcceptedAt())
+                .agreementVersion(f.getAgreementVersion())
+                .agreementAcceptedBy(f.getAgreementAcceptedBy())
                 .gst(f.getGst())
                 .nabhNumber(f.getNabhNumber())
                 .accreditationLevel(f.getAccreditationLevel())
@@ -357,6 +378,13 @@ public class FacilityService {
                 .build();
 
         FacilityDocument saved = facilityDocumentRepository.save(doc);
+        if ("FACILITY_REGISTRATION".equalsIgnoreCase(documentType)) {
+            // A new or replacement licence must be reviewed before the facility keeps its seal.
+            facility.setKycStatus("PENDING");
+            facility.setVerifiedAt(null);
+            facility.setKycNotes(null);
+            facilityProfileRepository.save(facility);
+        }
         auditLogService.logEvent(principal.getId(), "FACILITY_DOCUMENT_UPLOADED", "FacilityDocument", saved.getId().toString(), null);
 
         return FacilityDocumentDto.builder()
@@ -367,6 +395,9 @@ public class FacilityService {
                 .fileSizeBytes(saved.getFileSizeBytes())
                 .mimeType(saved.getMimeType())
                 .verified(saved.isVerified())
+                .reviewStatus(saved.getReviewStatus())
+                .reviewNotes(saved.getReviewNotes())
+                .reviewedAt(saved.getReviewedAt())
                 .createdAt(saved.getCreatedAt())
                 .build();
     }
@@ -383,6 +414,9 @@ public class FacilityService {
                         .fileSizeBytes(d.getFileSizeBytes())
                         .mimeType(d.getMimeType())
                         .verified(d.isVerified())
+                        .reviewStatus(d.getReviewStatus())
+                        .reviewNotes(d.getReviewNotes())
+                        .reviewedAt(d.getReviewedAt())
                         .createdAt(d.getCreatedAt())
                         .build())
                 .collect(Collectors.toList());

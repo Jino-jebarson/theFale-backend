@@ -3,6 +3,7 @@ package com.thefale.controller;
 import com.thefale.dto.*;
 import com.thefale.security.CustomUserPrincipal;
 import com.thefale.service.CandidateService;
+import com.thefale.service.ReferralService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -23,6 +24,28 @@ import java.util.UUID;
 public class CandidateController {
 
     private final CandidateService candidateService;
+    private final ReferralService referralService;
+
+    @GetMapping("/me/referrals")
+    @PreAuthorize("hasRole('CANDIDATE')")
+    @Operation(summary = "Get the candidate's referral code, invited candidates, and earned rewards")
+    public ResponseEntity<ApiResponse<CandidateReferralDashboardDto>> getReferrals(
+            @AuthenticationPrincipal CustomUserPrincipal principal) {
+        return ResponseEntity.ok(ApiResponse.success("Referral information fetched successfully", referralService.getDashboard(principal.getId())));
+    }
+
+    @PostMapping("/me/referrals/apply")
+    @PreAuthorize("hasRole('CANDIDATE')")
+    @Operation(summary = "Apply a referral code to the authenticated candidate account")
+    public ResponseEntity<ApiResponse<CandidateReferralEntryDto>> applyReferralCode(
+            @AuthenticationPrincipal CustomUserPrincipal principal,
+            @Valid @RequestBody ApplyReferralRequest request) {
+        var candidate = candidateService.getCandidateProfileEntity(principal);
+        var referral = referralService.applyCode(principal.getId(), candidate.getId(), request.getReferralCode());
+        return ResponseEntity.ok(ApiResponse.success("Referral code applied successfully", CandidateReferralEntryDto.builder()
+                .id(referral.getId()).candidateName(candidate.getName()).status(referral.getStatus())
+                .rewardStatus(referral.getRewardStatus()).joinedAt(referral.getCreatedAt()).build()));
+    }
 
     @PostMapping("/onboarding")
     @PreAuthorize("hasRole('CANDIDATE')")
@@ -45,15 +68,26 @@ public class CandidateController {
         return ResponseEntity.ok(ApiResponse.success("Profile fetched successfully", profile));
     }
 
-    @PutMapping({"/me/profile", "/profile"})
+    @RequestMapping(value = {"/me/profile", "/profile"}, method = {RequestMethod.PUT, RequestMethod.PATCH})
     @PreAuthorize("hasRole('CANDIDATE')")
-    @Operation(summary = "Update candidate profile details")
+    @Operation(summary = "Update candidate profile fields without changing onboarding or KYC status")
     public ResponseEntity<ApiResponse<CandidateProfileDto>> updateProfile(
             @AuthenticationPrincipal CustomUserPrincipal principal,
-            @Valid @RequestBody CandidateOnboardingRequest request
+            @Valid @RequestBody CandidateProfileUpdateRequest request
     ) {
-        CandidateProfileDto profile = candidateService.onboardCandidate(principal, request);
+        CandidateProfileDto profile = candidateService.updateCandidateProfile(principal, request);
         return ResponseEntity.ok(ApiResponse.success("Profile updated successfully", profile));
+    }
+
+    @PatchMapping("/me/education")
+    @PreAuthorize("hasRole('CANDIDATE')")
+    @Operation(summary = "Save candidate education details confirmed from a qualification certificate")
+    public ResponseEntity<ApiResponse<CandidateProfileDto>> updateEducation(
+            @AuthenticationPrincipal CustomUserPrincipal principal,
+            @Valid @RequestBody CandidateEducationUpdateRequest request
+    ) {
+        CandidateProfileDto profile = candidateService.updateEducation(principal, request);
+        return ResponseEntity.ok(ApiResponse.success("Education details updated successfully", profile));
     }
 
     @RequestMapping(value = {"/me/open-to-work", "/open-to-work"}, method = {RequestMethod.PATCH, RequestMethod.PUT, RequestMethod.POST})

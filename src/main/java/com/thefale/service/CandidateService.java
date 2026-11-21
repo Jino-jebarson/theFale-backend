@@ -35,6 +35,7 @@ public class CandidateService {
     private final NotificationRepository notificationRepository;
     private final AuditLogService auditLogService;
     private final ObjectMapper objectMapper;
+    private final ReferralService referralService;
 
     @Transactional
     public CandidateProfileDto onboardCandidate(CustomUserPrincipal principal, CandidateOnboardingRequest request) {
@@ -46,17 +47,21 @@ public class CandidateService {
         }
 
         boolean isStudent = "STUDENT".equalsIgnoreCase(request.getCandidateLevel()) ||
-                (request.getCourse() != null && !request.getCourse().isBlank() && request.getCouncilRegistrationNumber() == null);
+                ((request.getCandidateLevel() == null || request.getCandidateLevel().isBlank()) &&
+                 request.getCourse() != null && !request.getCourse().isBlank() && request.getCouncilRegistrationNumber() == null);
 
         String candidateLevel = isStudent ? "STUDENT" :
                 ("FRESHER".equalsIgnoreCase(request.getCandidateLevel()) ? "FRESHER" : "PROFESSIONAL");
 
         // Validate Student constraints vs Graduate constraints
-        if (isStudent) {
-            if (request.getCollegeName() == null || request.getCollegeName().isBlank()) {
-                throw new BadRequestException("College name is mandatory for healthcare students.");
-            }
-        } else {
+        if (isStudent && (request.getCourse() == null || request.getCourse().isBlank())) {
+            throw new BadRequestException("Course is required for students.");
+        }
+        if (isStudent && request.getUniversityRegNo() != null && !request.getUniversityRegNo().isBlank()
+                && request.getUniversityRegNo().trim().length() < 5) {
+            throw new BadRequestException("University registration number must be at least 5 characters.");
+        }
+        if (!isStudent) {
             if (request.getProfession() == null || request.getProfession().isBlank()) {
                 throw new BadRequestException("Profession is required for graduates.");
             }
@@ -85,12 +90,19 @@ public class CandidateService {
         profile.setGender(request.getGender());
         if (request.getDob() != null && !request.getDob().isBlank()) {
             try {
-                profile.setDob(java.time.LocalDate.parse(request.getDob().trim()));
-            } catch (Exception e) {
-                log.warn("Could not parse DOB: {}", request.getDob());
+                java.time.LocalDate date = java.time.LocalDate.parse(request.getDob().trim());
+                if (date.isBefore(java.time.LocalDate.of(1945, 1, 1)) || date.isAfter(java.time.LocalDate.now().minusYears(18))) {
+                    throw new BadRequestException("Check your date of birth. You must be 18 or older.");
+                }
+                profile.setDob(date);
+            } catch (java.time.format.DateTimeParseException e) {
+                throw new BadRequestException("Enter a valid date of birth.");
             }
         }
         profile.setCity(request.getCity().trim());
+        if (request.getLocality() != null) {
+            profile.setLocality(request.getLocality().trim());
+        }
         profile.setState(request.getState());
         profile.setPincode(request.getPincode());
         profile.setAddressLine(request.getAddressLine());
@@ -101,8 +113,14 @@ public class CandidateService {
             profile.setCollege(request.getCollegeName());
             profile.setStudyYear(request.getStudyYear());
             profile.setUniversityRegNo(request.getUniversityRegNo());
-            profile.setExpectedGraduationYear(request.getExpectedGraduationYear());
-            profile.setProfession(request.getCourse()); // e.g. MBBS Student
+            Integer graduationYear = request.getExpectedGraduationYear();
+            if (graduationYear == null && request.getExpectedGraduationMonth() != null) {
+                graduationYear = Integer.parseInt(request.getExpectedGraduationMonth().substring(0, 4));
+            }
+            profile.setExpectedGraduationYear(graduationYear);
+            profile.setExpectedGraduationMonth(request.getExpectedGraduationMonth());
+            profile.setProfession(request.getProfession() != null && !request.getProfession().isBlank()
+                    ? request.getProfession() : request.getCourse());
             profile.setQualification(request.getCourse());
         } else {
             profile.setProfession(request.getProfession());
@@ -157,6 +175,11 @@ public class CandidateService {
         profile.setNoticePeriod(request.getNoticePeriod());
 
         CandidateProfile savedProfile = profileRepository.save(profile);
+        savedProfile.setKycStatus("DOCUMENTS_REQUIRED");
+
+        if (request.getReferralCode() != null && !request.getReferralCode().isBlank()) {
+            referralService.applyCode(user.getId(), savedProfile.getId(), request.getReferralCode());
+        }
 
         // Record initial documents dynamically if URLs provided
         if (request.getResumeUrl() != null && !request.getResumeUrl().isBlank()) {
@@ -195,8 +218,171 @@ public class CandidateService {
             recordDocumentIfPresent(savedProfile.getId(), "PHOTO", request.getProfilePhotoUrl(), fileName);
         }
 
+        updateKycDocumentReadiness(savedProfile);
+
         auditLogService.logEvent(user.getId(), "CANDIDATE_ONBOARDED", "CandidateProfile", savedProfile.getId().toString(), null);
 
+        return getCandidateProfile(principal);
+    }
+
+    @Transactional(readOnly = true)
+    public CandidateProfile getCandidateProfileEntity(CustomUserPrincipal principal) {
+        return profileRepository.findByUserId(principal.getId())
+                .orElseThrow(() -> new ResourceNotFoundException("Candidate profile not found. Complete onboarding first."));
+    }
+
+    @Transactional
+    public CandidateProfileDto updateCandidateProfile(CustomUserPrincipal principal, CandidateProfileUpdateRequest request) {
+        User user = userRepository.findById(principal.getId())
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+        CandidateProfile profile = profileRepository.findByUserId(user.getId())
+                .orElseThrow(() -> new ResourceNotFoundException("Candidate profile not found. Complete onboarding first."));
+
+        if (request.getFullName() != null && !request.getFullName().isBlank()) profile.setName(request.getFullName().trim());
+        if (request.getEmail() != null && !request.getEmail().isBlank()) {
+            String email = request.getEmail().trim().toLowerCase();
+            if (!email.equalsIgnoreCase(user.getEmail())) {
+                userRepository.findByEmail(email).ifPresent(existing -> {
+                    if (!existing.getId().equals(user.getId())) throw new BadRequestException("That email is already in use by another account.");
+                });
+                user.setEmail(email);
+                userRepository.save(user);
+            }
+        }
+        if (request.getGender() != null) profile.setGender(blankToNull(request.getGender()));
+        if (request.getDob() != null) {
+            if (request.getDob().isBlank()) {
+                profile.setDob(null);
+            } else {
+                try {
+                    java.time.LocalDate dob = java.time.LocalDate.parse(request.getDob().trim());
+                    if (dob.isBefore(java.time.LocalDate.of(1945, 1, 1)) || dob.isAfter(java.time.LocalDate.now().minusYears(18))) {
+                        throw new BadRequestException("Check your date of birth. You must be 18 or older.");
+                    }
+                    profile.setDob(dob);
+                } catch (java.time.format.DateTimeParseException e) {
+                    throw new BadRequestException("Enter a valid date of birth.");
+                }
+            }
+        }
+        if (request.getCity() != null && !request.getCity().isBlank()) profile.setCity(request.getCity().trim());
+        if (request.getLocality() != null) profile.setLocality(blankToNull(request.getLocality()));
+        if (request.getState() != null) profile.setState(blankToNull(request.getState()));
+        if (request.getPincode() != null) profile.setPincode(blankToNull(request.getPincode()));
+        if (request.getAddressLine() != null) profile.setAddressLine(blankToNull(request.getAddressLine()));
+
+        boolean student = "STUDENT".equalsIgnoreCase(user.getCandidateLevel());
+        if (student) {
+            if (request.getCourse() != null) {
+                String course = blankToNull(request.getCourse());
+                profile.setCourse(course);
+                profile.setQualification(course);
+                if (course != null) profile.setProfession(course);
+            }
+            if (request.getStudyYear() != null) profile.setStudyYear(blankToNull(request.getStudyYear()));
+            if (request.getUniversityRegNo() != null) profile.setUniversityRegNo(blankToNull(request.getUniversityRegNo()));
+            if (request.getExpectedGraduationYear() != null) profile.setExpectedGraduationYear(request.getExpectedGraduationYear());
+            if (request.getExpectedGraduationMonth() != null) profile.setExpectedGraduationMonth(blankToNull(request.getExpectedGraduationMonth()));
+        } else {
+            if (request.getProfession() != null) profile.setProfession(blankToNull(request.getProfession()));
+            if (request.getPrimarySpecialty() != null) profile.setSpecialty(blankToNull(request.getPrimarySpecialty()));
+            if (request.getSubSpecialties() != null) profile.setSubSpecialties(listToJson(request.getSubSpecialties()));
+            if (request.getQualification() != null) profile.setQualification(blankToNull(request.getQualification()));
+            if (request.getCouncil() != null) profile.setCouncil(blankToNull(request.getCouncil()));
+            if (request.getCouncilRegistrationNumber() != null) profile.setRegNumber(blankToNull(request.getCouncilRegistrationNumber()));
+            if (request.getCouncilState() != null) profile.setCouncilState(blankToNull(request.getCouncilState()));
+            if (request.getRegYear() != null) profile.setRegYear(blankToNull(request.getRegYear()));
+            if (request.getExperienceYears() != null) profile.setExperienceYears(blankToNull(request.getExperienceYears()));
+        }
+        if (request.getCollegeName() != null) profile.setCollege(blankToNull(request.getCollegeName()));
+        if (request.getBio() != null) profile.setBio(blankToNull(request.getBio()));
+        if (request.getCurrentSalary() != null) profile.setCurrentSalary(blankToNull(request.getCurrentSalary()));
+        if (request.getNoticePeriod() != null) profile.setNoticePeriod(blankToNull(request.getNoticePeriod()));
+        if (request.getEmploymentType() != null) profile.setEmploymentType(blankToNull(request.getEmploymentType()));
+        if (request.getAvailability() != null) profile.setAvailability(blankToNull(request.getAvailability()));
+        if (request.getOpenToWork() != null) profile.setOpenToWork(request.getOpenToWork());
+        if (request.getRelocate() != null) profile.setRelocate(request.getRelocate());
+        if (request.getPreferredCities() != null) profile.setPreferredCities(listToJson(request.getPreferredCities()));
+        if (request.getSkills() != null) profile.setSkills(listToJson(request.getSkills()));
+        if (request.getLanguages() != null) profile.setLanguages(listToJson(request.getLanguages()));
+        if (request.getExperienceHistory() != null) {
+            for (CandidateExperienceDto experience : request.getExperienceHistory()) {
+                if (experience.getStartDate() == null || (!experience.isCurrent() && experience.getEndDate() == null)) {
+                    throw new BadRequestException("Enter a valid start and end month for each experience entry.");
+                }
+                try {
+                    java.time.YearMonth start = java.time.YearMonth.parse(experience.getStartDate());
+                    if (!experience.isCurrent()) {
+                        java.time.YearMonth end = java.time.YearMonth.parse(experience.getEndDate());
+                        if (end.isBefore(start)) throw new BadRequestException("An experience end date cannot be before its start date.");
+                    }
+                } catch (java.time.format.DateTimeParseException e) {
+                    throw new BadRequestException("Enter a valid start and end month for each experience entry.");
+                }
+            }
+            profile.setExperienceHistory(toJson(request.getExperienceHistory()));
+        }
+        if (request.getCertifications() != null) {
+            for (CandidateCertificationDto certification : request.getCertifications()) {
+                UUID documentId;
+                try {
+                    documentId = UUID.fromString(certification.getDocumentId());
+                } catch (Exception e) {
+                    throw new BadRequestException("Upload a certificate file for each certification.");
+                }
+                CandidateDocument document = documentRepository.findById(documentId)
+                        .orElseThrow(() -> new BadRequestException("The uploaded certificate could not be found. Please upload it again."));
+                if (!document.getCandidateId().equals(profile.getId()) || !"CERTIFICATION".equalsIgnoreCase(document.getDocumentType())) {
+                    throw new BadRequestException("Each certification must be linked to a certificate uploaded to your profile.");
+                }
+                try {
+                    java.time.LocalDate issue = certification.getIssueDate() == null ? null : java.time.LocalDate.parse(certification.getIssueDate());
+                    java.time.LocalDate expiry = certification.getExpiryDate() == null ? null : java.time.LocalDate.parse(certification.getExpiryDate());
+                    if (issue != null && expiry != null && expiry.isBefore(issue)) {
+                        throw new BadRequestException("A certificate expiry date cannot be before its issue date.");
+                    }
+                } catch (java.time.format.DateTimeParseException e) {
+                    throw new BadRequestException("Enter a valid certificate issue or expiry date.");
+                }
+            }
+            profile.setCertifications(toJson(request.getCertifications()));
+        }
+        if (Boolean.TRUE.equals(request.getUpdateExpectedSalary())) {
+            Long minPaise = request.getExpectedSalaryMinPaise() != null
+                    ? request.getExpectedSalaryMinPaise()
+                    : request.getExpectedSalaryMinRupees() == null ? null : request.getExpectedSalaryMinRupees() * 100L;
+            Long maxPaise = request.getExpectedSalaryMaxPaise() != null
+                    ? request.getExpectedSalaryMaxPaise()
+                    : request.getExpectedSalaryMaxRupees() == null ? null : request.getExpectedSalaryMaxRupees() * 100L;
+            profile.setExpectedSalaryMinPaise(minPaise);
+            profile.setExpectedSalaryMaxPaise(maxPaise);
+        }
+
+        CandidateProfile saved = profileRepository.save(profile);
+        auditLogService.logEvent(user.getId(), "CANDIDATE_PROFILE_UPDATED", "CandidateProfile", saved.getId().toString(), null);
+        return getCandidateProfile(principal);
+    }
+
+    private String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    @Transactional
+    public CandidateProfileDto updateEducation(CustomUserPrincipal principal, CandidateEducationUpdateRequest request) {
+        User user = userRepository.findById(principal.getId())
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+        if ("STUDENT".equalsIgnoreCase(user.getCandidateLevel())) {
+            throw new BadRequestException("Student profiles use their course as the qualification.");
+        }
+
+        CandidateProfile profile = profileRepository.findByUserId(user.getId())
+                .orElseThrow(() -> new ResourceNotFoundException("Candidate profile not found. Complete onboarding first."));
+        profile.setQualification(request.getQualification().trim());
+        if (request.getCollegeName() != null) {
+            profile.setCollege(request.getCollegeName().trim());
+        }
+        profileRepository.save(profile);
+        auditLogService.logEvent(user.getId(), "CANDIDATE_EDUCATION_UPDATED", "CandidateProfile", profile.getId().toString(), null);
         return getCandidateProfile(principal);
     }
 
@@ -237,6 +423,9 @@ public class CandidateService {
                         .fileSizeBytes(doc.getFileSizeBytes())
                         .mimeType(doc.getMimeType())
                         .verified(doc.isVerified())
+                        .reviewStatus(doc.getReviewStatus())
+                        .reviewNotes(doc.getReviewNotes())
+                        .reviewedAt(doc.getReviewedAt())
                         .createdAt(doc.getCreatedAt())
                         .build())
                 .collect(Collectors.toList());
@@ -270,6 +459,7 @@ public class CandidateService {
                 .gender(profile.getGender())
                 .dob(profile.getDob())
                 .city(profile.getCity())
+                .locality(profile.getLocality())
                 .state(profile.getState())
                 .pincode(profile.getPincode())
                 .addressLine(profile.getAddressLine())
@@ -280,6 +470,7 @@ public class CandidateService {
                 .studyYear(profile.getStudyYear())
                 .universityRegNo(profile.getUniversityRegNo())
                 .expectedGraduationYear(profile.getExpectedGraduationYear())
+                .expectedGraduationMonth(profile.getExpectedGraduationMonth())
                 .profession(profile.getProfession())
                 .specialty(profile.getSpecialty())
                 .subSpecialties(jsonToList(profile.getSubSpecialties()))
@@ -289,6 +480,8 @@ public class CandidateService {
                 .regNumber(profile.getRegNumber())
                 .regYear(profile.getRegYear())
                 .experienceYears(profile.getExperienceYears())
+                .experienceHistory(jsonToTypedList(profile.getExperienceHistory(), new TypeReference<List<CandidateExperienceDto>>() {}))
+                .certifications(jsonToTypedList(profile.getCertifications(), new TypeReference<List<CandidateCertificationDto>>() {}))
                 .bio(profile.getBio())
                 .expectedSalaryMinPaise(profile.getExpectedSalaryMinPaise())
                 .expectedSalaryMaxPaise(profile.getExpectedSalaryMaxPaise())
@@ -301,7 +494,7 @@ public class CandidateService {
                 .preferredCities(jsonToList(profile.getPreferredCities()))
                 .openToWork(profile.getOpenToWork())
                 .relocate(profile.getRelocate())
-                .kycStatus(profile.getKycStatus())
+                .kycStatus(effectiveKycStatus(profile, user))
                 .kycNotes(profile.getKycNotes())
                 .isMentor(Boolean.TRUE.equals(profile.getIsMentor()))
                 .mentorStatus(profile.getMentorStatus() != null ? profile.getMentorStatus() : "NONE")
@@ -425,11 +618,38 @@ public class CandidateService {
             throw new ForbiddenException("You cannot delete documents that do not belong to your profile");
         }
 
+        boolean affectsKyc = isKycRequirementDocument(document.getDocumentType());
+        if ("CERTIFICATION".equalsIgnoreCase(document.getDocumentType())) {
+            List<CandidateCertificationDto> certifications = jsonToTypedList(profile.getCertifications(), new TypeReference<List<CandidateCertificationDto>>() {});
+            profile.setCertifications(toJson(certifications.stream()
+                    .filter(certification -> !documentId.toString().equals(certification.getDocumentId()))
+                    .toList()));
+        }
         documentRepository.delete(document);
+        if (affectsKyc) {
+            if ("VERIFIED".equalsIgnoreCase(profile.getKycStatus())) {
+                profile.setKycStatus("DOCUMENTS_REQUIRED");
+                profile.setVerifiedAt(null);
+            }
+            updateKycDocumentReadiness(profile);
+        }
     }
 
     @Transactional
     public CandidateDocumentDto recordDocument(CustomUserPrincipal principal, String documentType, String originalFileName, String fileUrl) {
+        if (documentType == null || documentType.isBlank()) {
+            throw new BadRequestException("Document type is required");
+        }
+        if (originalFileName == null || originalFileName.isBlank()) {
+            throw new BadRequestException("File name is required");
+        }
+        if (fileUrl == null || fileUrl.isBlank()) {
+            throw new BadRequestException("Document file is required");
+        }
+        if (estimateFileSize(fileUrl) > 5L * 1024 * 1024) {
+            throw new BadRequestException("Document is too large. Maximum file size is 5 MB");
+        }
+
         CandidateProfile profile = profileRepository.findByUserId(principal.getId())
                 .orElseThrow(() -> new ResourceNotFoundException("Candidate profile not found"));
 
@@ -447,12 +667,14 @@ public class CandidateService {
                 .documentType(documentType)
                 .fileUrl(fileUrl)
                 .originalFileName(originalFileName)
-                .fileSizeBytes(512000L)
-                .mimeType(fileUrl != null && fileUrl.endsWith(".pdf") ? "application/pdf" : "image/jpeg")
+                .fileSizeBytes(estimateFileSize(fileUrl))
+                .mimeType(resolveMimeType(fileUrl, originalFileName))
                 .verified(false)
+                .reviewStatus(isReviewableCredential(documentType) ? "PENDING" : "NOT_REQUIRED")
                 .build();
 
         CandidateDocument saved = documentRepository.save(doc);
+        if (isKycRequirementDocument(documentType)) updateKycDocumentReadiness(profile);
         auditLogService.logEvent(principal.getId(), "CANDIDATE_DOCUMENT_UPLOADED", "CandidateDocument", saved.getId().toString(), null);
 
         return CandidateDocumentDto.builder()
@@ -463,6 +685,9 @@ public class CandidateService {
                 .fileSizeBytes(saved.getFileSizeBytes())
                 .mimeType(saved.getMimeType())
                 .verified(saved.isVerified())
+                .reviewStatus(saved.getReviewStatus())
+                .reviewNotes(saved.getReviewNotes())
+                .reviewedAt(saved.getReviewedAt())
                 .createdAt(saved.getCreatedAt())
                 .build();
     }
@@ -508,9 +733,63 @@ public class CandidateService {
                     .fileSizeBytes(calculatedSize > 0 ? calculatedSize : 256000L)
                     .mimeType(mime)
                     .verified(false)
+                    .reviewStatus(isReviewableCredential(docType) ? "PENDING" : "NOT_REQUIRED")
                     .build();
             documentRepository.save(doc);
         }
+    }
+
+    private boolean isReviewableCredential(String documentType) {
+        return documentType != null && !List.of("PHOTO", "PROFILE_PHOTO", "RESUME").contains(documentType.toUpperCase());
+    }
+
+    private boolean isKycRequirementDocument(String documentType) {
+        return documentType != null && List.of("ID_PROOF", "REGISTRATION_CERTIFICATE", "DEGREE_CERTIFICATE", "BONAFIDE", "STUDENT_ID")
+                .contains(documentType.toUpperCase());
+    }
+
+    private void updateKycDocumentReadiness(CandidateProfile profile) {
+        if ("VERIFIED".equalsIgnoreCase(profile.getKycStatus())) return;
+        User user = userRepository.findById(profile.getUserId()).orElse(null);
+        boolean student = user != null && "STUDENT".equalsIgnoreCase(user.getCandidateLevel());
+        List<CandidateDocument> documents = documentRepository.findByCandidateId(profile.getId());
+        boolean readyForReview = CandidateKycRequirements.hasRequiredDocuments(student, documents, profile.getUniversityRegNo());
+        profile.setKycStatus(readyForReview ? "PENDING" : "DOCUMENTS_REQUIRED");
+        if (readyForReview) profile.setKycNotes(null);
+        profile.setVerifiedAt(null);
+        profileRepository.save(profile);
+    }
+
+    private String effectiveKycStatus(CandidateProfile profile, User user) {
+        String status = profile.getKycStatus();
+        if ("VERIFIED".equalsIgnoreCase(status) || "REJECTED".equalsIgnoreCase(status)) return status;
+        boolean student = user != null && "STUDENT".equalsIgnoreCase(user.getCandidateLevel());
+        return CandidateKycRequirements.hasRequiredDocuments(student,
+                documentRepository.findByCandidateId(profile.getId()), profile.getUniversityRegNo())
+                ? "PENDING" : "DOCUMENTS_REQUIRED";
+    }
+
+    private String resolveMimeType(String fileUrl, String fileName) {
+        if (fileUrl != null && fileUrl.startsWith("data:")) {
+            int end = fileUrl.indexOf(';');
+            int comma = fileUrl.indexOf(',');
+            int stop = end > 0 ? end : comma;
+            if (stop > 5) return fileUrl.substring(5, stop).toLowerCase();
+        }
+        String lowerName = fileName == null ? "" : fileName.toLowerCase();
+        if (lowerName.endsWith(".pdf")) return "application/pdf";
+        if (lowerName.endsWith(".png")) return "image/png";
+        if (lowerName.endsWith(".webp")) return "image/webp";
+        if (lowerName.endsWith(".jpg") || lowerName.endsWith(".jpeg")) return "image/jpeg";
+        return "application/octet-stream";
+    }
+
+    private long estimateFileSize(String fileUrl) {
+        if (fileUrl != null && fileUrl.startsWith("data:")) {
+            int comma = fileUrl.indexOf(',');
+            if (comma >= 0) return Math.max(0, (long) ((fileUrl.length() - comma - 1) * 0.75));
+        }
+        return 0L;
     }
 
     private String listToJson(List<String> list) {
@@ -520,6 +799,24 @@ public class CandidateService {
         } catch (Exception e) {
             log.warn("Failed to serialize list to JSON", e);
             return null;
+        }
+    }
+
+    private String toJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (Exception e) {
+            throw new BadRequestException("Could not save profile details. Please review your entries and try again.");
+        }
+    }
+
+    private <T> List<T> jsonToTypedList(String json, TypeReference<List<T>> type) {
+        if (json == null || json.isBlank()) return Collections.emptyList();
+        try {
+            return objectMapper.readValue(json, type);
+        } catch (Exception e) {
+            log.warn("Failed to deserialize candidate profile list", e);
+            return Collections.emptyList();
         }
     }
 

@@ -153,6 +153,7 @@ erDiagram
 | `study_year` | VARCHAR(30) | NULLABLE | 1st year..Internship year |
 | `university_reg_no`| VARCHAR(50) | NULLABLE | University bona fide student roll number |
 | `expected_graduation_year` | INT | NULLABLE | Expected year of graduation |
+| `expected_graduation_month` | VARCHAR(7) | NULLABLE | Expected graduation month in `YYYY-MM` format |
 | `profession` | VARCHAR(50) | NULLABLE | Doctor, Nurse, Physiotherapist, etc. |
 | `specialty` | VARCHAR(100) | NULLABLE | Specialty/Department |
 | `qualification` | VARCHAR(100) | NULLABLE | Degree / Diploma |
@@ -164,7 +165,7 @@ erDiagram
 | `expected_salary_min_paise` | BIGINT | NULLABLE | Expected monthly compensation min (paise) |
 | `expected_salary_max_paise` | BIGINT | NULLABLE | Expected monthly compensation max (paise) |
 | `notice_period` | VARCHAR(50) | NULLABLE | Notice period duration |
-| `kyc_status` | VARCHAR(30) | NOT NULL DEFAULT 'PENDING', CHECK in ('PENDING', 'VERIFIED', 'REJECTED') | Verification queue status |
+| `kyc_status` | VARCHAR(30) | NOT NULL DEFAULT 'PENDING', CHECK in ('DOCUMENTS_REQUIRED', 'PENDING', 'VERIFIED', 'REJECTED') | Verification queue status |
 | `kyc_notes` | TEXT | NULLABLE | Admin reviewer feedback |
 | `verified_at` | TIMESTAMP WITH TIME ZONE | NULLABLE | Verification timestamp |
 | `created_at` | TIMESTAMP WITH TIME ZONE | NOT NULL DEFAULT CURRENT_TIMESTAMP | Creation timestamp |

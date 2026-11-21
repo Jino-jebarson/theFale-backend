@@ -29,6 +29,11 @@ public class FacilityProfileDto {
     private int beds;
     private int icuBeds;
     private String licenseNumber;
+    private String groupName;
+    private String branchName;
+    private Instant agreementAcceptedAt;
+    private String agreementVersion;
+    private String agreementAcceptedBy;
     private String gst;
     private String nabhNumber;
     private String accreditationLevel;

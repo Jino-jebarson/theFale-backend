@@ -1,12 +1,18 @@
 package com.thefale.service;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.thefale.dto.CandidateCertificationDto;
 import com.thefale.entity.*;
 import com.thefale.exception.BadRequestException;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 
 public final class ShiftRules {
     private ShiftRules() {}
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private static final TypeReference<List<CandidateCertificationDto>> CERTIFICATION_LIST = new TypeReference<>() {};
     public static final Set<String> RESERVED = Set.of("CONFIRMED", "CHECKED_IN", "IN_PROGRESS", "TIMESHEET_SUBMITTED", "COMPLETED", "DISPUTED");
     public static boolean reservesSlot(ShiftClaim claim) { return RESERVED.contains(String.valueOf(claim.getStatus()).toUpperCase()); }
 
@@ -28,8 +34,8 @@ public final class ShiftRules {
             throw new BadRequestException("This shift requires profession: " + d.getProfession());
         if (d.isRegistrationRequired() && !"VERIFIED".equalsIgnoreCase(candidate.getKycStatus()))
             throw new BadRequestException("Verified registration is required.");
-        if (d.isBlsRequired() && !certificate(documents, "BLS")) throw new BadRequestException("A platform-verified BLS certificate is required.");
-        if (d.isAclsRequired() && !certificate(documents, "ACLS")) throw new BadRequestException("A platform-verified ACLS certificate is required.");
+        if (d.isBlsRequired() && !certificate(candidate, documents, "BLS")) throw new BadRequestException("A platform-verified BLS certificate is required.");
+        if (d.isAclsRequired() && !certificate(candidate, documents, "ACLS")) throw new BadRequestException("A platform-verified ACLS certificate is required.");
         String skills = String.valueOf(candidate.getSkills()) + " " + String.valueOf(candidate.getSpecialty());
         if (d.isIcuExperienceRequired() && !(skills.toLowerCase().contains("icu") || skills.toLowerCase().contains("critical care")))
             throw new BadRequestException("ICU experience must be present in your profile.");
@@ -49,10 +55,34 @@ public final class ShiftRules {
         if (text.equals("doctor") || text.contains("medical officer") || text.contains("physician") || text.contains("surgeon")) return "doctor";
         return text.replaceAll("[^a-z0-9]", "");
     }
-    private static boolean certificate(List<CandidateDocument> docs, String name) {
-        return docs != null && docs.stream().anyMatch(d -> d.isVerified() &&
-                (name.equalsIgnoreCase(d.getDocumentType()) || java.util.regex.Pattern.compile("(?i)\\b" + name + "\\b")
-                        .matcher(String.valueOf(d.getOriginalFileName())).find()));
+    private static boolean certificate(CandidateProfile candidate, List<CandidateDocument> docs, String name) {
+        if (docs == null) return false;
+        Set<UUID> verifiedDocumentIds = docs.stream()
+                .filter(CandidateDocument::isVerified)
+                .map(CandidateDocument::getId)
+                .collect(java.util.stream.Collectors.toSet());
+        java.util.regex.Pattern certificateName = java.util.regex.Pattern.compile("(?i)\\b" + name + "\\b");
+        boolean matchedDocument = docs.stream().anyMatch(document -> document.isVerified()
+                && (name.equalsIgnoreCase(document.getDocumentType())
+                || certificateName.matcher(String.valueOf(document.getOriginalFileName())).find()));
+        if (matchedDocument) return true;
+
+        // Candidate certificates store their display name separately from the uploaded file name.
+        // Honor that metadata only when its linked document has been verified by the platform.
+        try {
+            List<CandidateCertificationDto> certifications = OBJECT_MAPPER.readValue(candidate.getCertifications(), CERTIFICATION_LIST);
+            return certifications != null && certifications.stream().anyMatch(certification -> {
+                if (certification.getName() == null || certification.getDocumentId() == null
+                        || !certificateName.matcher(certification.getName()).find()) return false;
+                try {
+                    return verifiedDocumentIds.contains(UUID.fromString(certification.getDocumentId()));
+                } catch (IllegalArgumentException ignored) {
+                    return false;
+                }
+            });
+        } catch (Exception ignored) {
+            return false;
+        }
     }
     private static boolean blank(String text) { return text == null || text.isBlank(); }
 }

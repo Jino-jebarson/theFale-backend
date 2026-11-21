@@ -6,6 +6,7 @@ import com.thefale.entity.HuddlePost;
 import com.thefale.entity.StudentUpgradeRequest;
 import com.thefale.security.CustomUserPrincipal;
 import com.thefale.service.AdminService;
+import com.thefale.service.ReferralService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -27,6 +28,28 @@ public class AdminController {
 
     private final AdminService adminService;
     private final com.thefale.service.SupportService supportService;
+    private final ReferralService referralService;
+
+    @GetMapping("/referrals/rewards")
+    @Operation(summary = "List candidate referral rewards waiting for finance review")
+    public ResponseEntity<ApiResponse<List<CandidateReferralEntryDto>>> getReferralRewards() {
+        return ResponseEntity.ok(ApiResponse.success(referralService.getAdminRewards()));
+    }
+
+    @PostMapping("/referrals/rewards/{id}/release")
+    @Operation(summary = "Release a held referral reward after manual review")
+    public ResponseEntity<ApiResponse<CandidateReferralEntryDto>> releaseReferralReward(
+            @AuthenticationPrincipal CustomUserPrincipal principal, @PathVariable UUID id) {
+        return ResponseEntity.ok(ApiResponse.success("Referral reward released for payout", referralService.releaseHeldReward(id, principal.getId())));
+    }
+
+    @PostMapping("/referrals/rewards/{id}/paid")
+    @Operation(summary = "Record actual payment of a candidate referral reward")
+    public ResponseEntity<ApiResponse<CandidateReferralEntryDto>> markReferralRewardPaid(
+            @AuthenticationPrincipal CustomUserPrincipal principal, @PathVariable UUID id,
+            @Valid @RequestBody ReferralRewardPaymentRequest request) {
+        return ResponseEntity.ok(ApiResponse.success("Referral reward payment recorded", referralService.markRewardPaid(id, request.getPaymentReference(), principal.getId())));
+    }
 
     @GetMapping({"/dashboard", "/metrics"})
     @Operation(summary = "Get admin dashboard KPI metrics")
@@ -73,6 +96,17 @@ public class AdminController {
         }
         CandidateProfileDto candidate = adminService.reviewCandidateKyc(principal, id, request);
         return ResponseEntity.ok(ApiResponse.success("Candidate KYC rejected", candidate));
+    }
+
+    @PostMapping("/kyc/candidates/{candidateId}/documents/{documentId}/review")
+    @Operation(summary = "Approve or reject an individual candidate verification document")
+    public ResponseEntity<ApiResponse<CandidateDocumentDto>> reviewCandidateDocument(
+            @AuthenticationPrincipal CustomUserPrincipal principal,
+            @PathVariable UUID candidateId,
+            @PathVariable UUID documentId,
+            @Valid @RequestBody AdminKycReviewRequest request) {
+        CandidateDocumentDto document = adminService.reviewCandidateDocument(principal, candidateId, documentId, request);
+        return ResponseEntity.ok(ApiResponse.success("Candidate document review recorded", document));
     }
 
     @GetMapping({"/candidates/upgrade-requests", "/candidates/upgrades"})

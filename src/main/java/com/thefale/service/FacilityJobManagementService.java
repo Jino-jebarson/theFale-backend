@@ -41,10 +41,15 @@ public class FacilityJobManagementService {
     private final NotificationRepository notificationRepository;
     private final AuditLogService auditLogService;
     private final ShiftClaimService shiftClaimService;
+    private final ReferralService referralService;
 
     @Transactional
     public JobPostingDto postJob(CustomUserPrincipal principal, PostJobRequest request) {
         FacilityProfile facility = facilityService.getOrCreateFacilityProfile(principal);
+
+        if (!"VERIFIED".equalsIgnoreCase(facility.getKycStatus())) {
+            throw new ForbiddenException("Hospital verification is required before publishing jobs.");
+        }
 
         if (request.getSalaryMinPaise() > request.getSalaryMaxPaise()) {
             throw new BadRequestException("Minimum salary cannot exceed maximum salary");
@@ -93,6 +98,9 @@ public class FacilityJobManagementService {
     @Transactional
     public List<JobApplicationDto> getFacilityApplicants(CustomUserPrincipal principal, UUID jobId, String statusFilter) {
         FacilityProfile facility = facilityService.getOrCreateFacilityProfile(principal);
+        if (!"VERIFIED".equalsIgnoreCase(facility.getKycStatus())) {
+            throw new ForbiddenException("Facility verification is required before viewing applicants.");
+        }
 
         List<JobPosting> facilityJobs;
         if (jobId != null) {
@@ -317,6 +325,10 @@ public class FacilityJobManagementService {
 
         JobApplication saved = jobApplicationRepository.save(application);
 
+        if ("HIRED".equalsIgnoreCase(targetStatus)) {
+            referralService.qualifyForHire(application.getCandidateId());
+        }
+
         // When a candidate is hired for this role, check if all openings are filled
         if ("HIRED".equalsIgnoreCase(targetStatus)) {
             List<JobApplication> allApps = jobApplicationRepository.findByJobId(job.getId());
@@ -433,6 +445,9 @@ public class FacilityJobManagementService {
                 .fileSizeBytes(d.getFileSizeBytes())
                 .mimeType(d.getMimeType())
                 .verified(d.isVerified())
+                .reviewStatus(d.getReviewStatus())
+                .reviewNotes(d.getReviewNotes())
+                .reviewedAt(d.getReviewedAt())
                 .createdAt(d.getCreatedAt())
                 .build()).collect(Collectors.toList());
 
@@ -525,6 +540,9 @@ public class FacilityJobManagementService {
                 .fileSizeBytes(d.getFileSizeBytes())
                 .mimeType(d.getMimeType())
                 .verified(d.isVerified())
+                .reviewStatus(d.getReviewStatus())
+                .reviewNotes(d.getReviewNotes())
+                .reviewedAt(d.getReviewedAt())
                 .createdAt(d.getCreatedAt())
                 .build()).collect(Collectors.toList());
 

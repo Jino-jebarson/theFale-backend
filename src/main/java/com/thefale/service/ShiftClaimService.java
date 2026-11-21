@@ -48,6 +48,7 @@ public class ShiftClaimService {
     private final UserRepository userRepository;
     private final AuditLogService auditLogService;
     private final CandidateDocumentRepository candidateDocumentRepository;
+    private final ReferralService referralService;
 
     @Transactional
     public ShiftClaimDto claimShift(CustomUserPrincipal principal, UUID shiftId) {
@@ -427,6 +428,7 @@ public class ShiftClaimService {
         if (candidate != null) {
             candidate.setCompletedShiftsCount((candidate.getCompletedShiftsCount() != null ? candidate.getCompletedShiftsCount() : 0) + 1);
             candidateProfileRepository.save(candidate);
+            referralService.qualifyForFirstCompletedShift(candidate.getId());
 
             String hosp = facility != null ? facility.getHospitalName() : "Hospital Partner";
             notificationRepository.save(Notification.builder()

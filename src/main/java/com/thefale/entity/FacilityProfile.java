@@ -58,8 +58,23 @@ public class FacilityProfile {
     @Column(name = "icu_beds")
     private int icuBeds = 0;
 
-    @Column(name = "license_number", nullable = false, length = 50)
+    @Column(name = "license_number", length = 50)
     private String licenseNumber;
+
+    @Column(name = "group_name", length = 150)
+    private String groupName;
+
+    @Column(name = "branch_name", length = 150)
+    private String branchName;
+
+    @Column(name = "agreement_accepted_at")
+    private Instant agreementAcceptedAt;
+
+    @Column(name = "agreement_version", length = 30)
+    private String agreementVersion;
+
+    @Column(name = "agreement_accepted_by", length = 100)
+    private String agreementAcceptedBy;
 
     @Column(length = 30)
     private String gst;

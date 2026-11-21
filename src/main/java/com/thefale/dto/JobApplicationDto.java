@@ -28,6 +28,7 @@ public class JobApplicationDto {
     private String status;
     private int matchScore;
     private Instant appliedAt;
+    private Instant updatedAt;
     private Instant interviewScheduledAt;
     private String interviewLocationOrLink;
     private String withdrawalReason;

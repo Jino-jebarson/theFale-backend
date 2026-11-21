@@ -189,6 +189,9 @@ public class ShiftManagementService {
     @Transactional
     public LocumShiftDto updateShift(CustomUserPrincipal principal, UUID shiftId, PostShiftRequest request) {
         FacilityProfile facility = facilityService.getOrCreateFacilityProfile(principal);
+        if (!"VERIFIED".equalsIgnoreCase(facility.getKycStatus())) {
+            throw new ForbiddenException("Hospital verification is required before publishing or updating shifts.");
+        }
 
         LocumShift shift = locumShiftRepository.findByIdWithLock(shiftId)
                 .orElseThrow(() -> new ResourceNotFoundException("Locum shift not found"));

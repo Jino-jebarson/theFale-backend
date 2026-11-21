@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -51,7 +52,7 @@ public class AdminService {
 
     @Transactional(readOnly = true)
     public AdminDashboardMetricsDto getDashboardMetrics() {
-        long pendingCandidates = candidateProfileRepository.countByKycStatus("PENDING");
+        long pendingCandidates = getCandidates("PENDING").size();
         long verifiedCandidates = candidateProfileRepository.countByKycStatus("VERIFIED");
         long totalCandidates = candidateProfileRepository.count();
 
@@ -163,14 +164,10 @@ public class AdminService {
 
     @Transactional(readOnly = true)
     public List<CandidateProfileDto> getCandidates(String status) {
-        List<CandidateProfile> list;
-        if (status == null || status.isBlank() || "ALL".equalsIgnoreCase(status)) {
-            list = candidateProfileRepository.findAll();
-        } else {
-            list = candidateProfileRepository.findByKycStatus(status.trim().toUpperCase());
-        }
-        return list.stream()
+        return candidateProfileRepository.findAll().stream()
                 .map(this::mapCandidateToDto)
+                .filter(dto -> status == null || status.isBlank() || "ALL".equalsIgnoreCase(status)
+                        || status.trim().equalsIgnoreCase(dto.getKycStatus()))
                 .collect(Collectors.toList());
     }
 
@@ -185,8 +182,35 @@ public class AdminService {
                 .orElseThrow(() -> new ResourceNotFoundException("Candidate profile not found"));
 
         boolean approved = "APPROVE".equalsIgnoreCase(request.getAction());
+        User user = userRepository.findById(candidate.getUserId()).orElse(null);
+        boolean student = user != null && "STUDENT".equalsIgnoreCase(user.getCandidateLevel());
+        if (approved) {
+            List<CandidateDocument> documents = candidateDocumentRepository.findByCandidateId(candidateId);
+            if (!CandidateKycRequirements.requiredDocumentsApproved(student, documents, candidate.getUniversityRegNo())) {
+                throw new BadRequestException("Approve all required candidate documents before issuing the verified seal.");
+            }
+        } else {
+            Set<String> requiredTypes = student
+                    ? Set.of("STUDENT_ID", "BONAFIDE")
+                    : Set.of("ID_PROOF", "REGISTRATION_CERTIFICATE", "DEGREE_CERTIFICATE");
+            String notes = request.getNotes() == null || request.getNotes().isBlank()
+                    ? "Please re-upload the required verification documents." : request.getNotes().trim();
+            candidateDocumentRepository.findByCandidateId(candidateId).stream()
+                    .filter(document -> document.getDocumentType() != null
+                            && requiredTypes.contains(document.getDocumentType().trim().toUpperCase()))
+                    .forEach(document -> {
+                        document.setVerified(false);
+                        document.setReviewStatus("REJECTED");
+                        document.setReviewNotes(notes);
+                        document.setReviewedAt(Instant.now());
+                        document.setReviewedBy(principal.getId());
+                        candidateDocumentRepository.save(document);
+                    });
+            candidate.setKycNotes(notes);
+        }
         candidate.setKycStatus(approved ? "VERIFIED" : "REJECTED");
         candidate.setVerifiedAt(approved ? Instant.now() : null);
+        if (approved) candidate.setKycNotes(null);
         CandidateProfile saved = candidateProfileRepository.save(candidate);
 
         // Notify Candidate
@@ -204,6 +228,67 @@ public class AdminService {
         auditLogService.logEvent(principal.getId(), "ADMIN_CANDIDATE_KYC_REVIEWED", "CandidateProfile", saved.getId().toString(), null);
 
         return mapCandidateToDto(saved);
+    }
+
+    @Transactional
+    public CandidateDocumentDto reviewCandidateDocument(CustomUserPrincipal principal, UUID candidateId, UUID documentId, AdminKycReviewRequest request) {
+        CandidateProfile candidate = candidateProfileRepository.findById(candidateId)
+                .orElseThrow(() -> new ResourceNotFoundException("Candidate profile not found"));
+        CandidateDocument document = candidateDocumentRepository.findById(documentId)
+                .filter(item -> item.getCandidateId().equals(candidateId))
+                .orElseThrow(() -> new ResourceNotFoundException("Candidate document not found"));
+
+        boolean approved = "APPROVE".equalsIgnoreCase(request.getAction());
+        String notes = request.getNotes() == null ? null : request.getNotes().trim();
+        if (!approved && (notes == null || notes.isBlank())) {
+            throw new BadRequestException("A reason is required when rejecting a document.");
+        }
+
+        document.setVerified(approved);
+        document.setReviewStatus(approved ? "VERIFIED" : "REJECTED");
+        document.setReviewNotes(approved ? null : notes);
+        document.setReviewedAt(Instant.now());
+        document.setReviewedBy(principal.getId());
+        CandidateDocument saved = candidateDocumentRepository.save(document);
+        if (!approved) {
+            User user = userRepository.findById(candidate.getUserId()).orElse(null);
+            boolean student = user != null && "STUDENT".equalsIgnoreCase(user.getCandidateLevel());
+            candidate.setKycStatus(CandidateKycRequirements.hasRequiredDocuments(student,
+                    candidateDocumentRepository.findByCandidateId(candidateId), candidate.getUniversityRegNo())
+                    ? "PENDING" : "DOCUMENTS_REQUIRED");
+            candidate.setVerifiedAt(null);
+            candidateProfileRepository.save(candidate);
+        }
+
+        String title = approved ? "Document approved" : "Document needs a new upload";
+        String message = approved
+                ? saved.getOriginalFileName() + " has been verified by the FALE team."
+                : saved.getOriginalFileName() + " needs a new upload: " + notes;
+        notificationRepository.save(Notification.builder()
+                .userId(candidate.getUserId())
+                .title(title)
+                .message(message)
+                .type("KYC")
+                .actionUrl("/profile")
+                .read(false)
+                .build());
+
+        auditLogService.logEvent(principal.getId(), approved ? "ADMIN_CANDIDATE_DOCUMENT_APPROVED" : "ADMIN_CANDIDATE_DOCUMENT_REJECTED",
+                "CandidateDocument", saved.getId().toString(), Map.<String, Object>of("candidateId", candidateId.toString(), "documentType", saved.getDocumentType(), "notes", notes == null ? "" : notes));
+
+        return CandidateDocumentDto.builder()
+                .id(saved.getId())
+                .documentType(saved.getDocumentType())
+                .originalFileName(saved.getOriginalFileName())
+                .fileUrl(saved.getFileUrl())
+                .fileSizeBytes(saved.getFileSizeBytes())
+                .mimeType(saved.getMimeType())
+                .verified(saved.isVerified())
+                .reviewStatus(saved.getReviewStatus())
+                .reviewNotes(saved.getReviewNotes())
+                .reviewedAt(saved.getReviewedAt())
+                .createdAt(saved.getCreatedAt())
+                .build();
     }
 
     @Transactional(readOnly = true)
@@ -289,9 +374,36 @@ public class AdminService {
                 .orElseThrow(() -> new ResourceNotFoundException("Facility profile not found"));
 
         boolean approved = "APPROVE".equalsIgnoreCase(request.getAction());
+        List<FacilityDocument> documents = facilityDocumentRepository.findByFacilityId(facilityId);
+        String notes = request.getNotes() == null ? null : request.getNotes().trim();
+        if (approved) {
+            boolean hasRegistration = documents.stream().anyMatch(document ->
+                    "FACILITY_REGISTRATION".equalsIgnoreCase(document.getDocumentType())
+                            && !"REJECTED".equalsIgnoreCase(document.getReviewStatus()));
+            if (!hasRegistration) {
+                throw new BadRequestException("Upload a facility registration or licence document before approving facility verification.");
+            }
+            documents.forEach(document -> {
+                document.setVerified(true);
+                document.setReviewStatus("VERIFIED");
+                document.setReviewNotes(null);
+                document.setReviewedAt(Instant.now());
+                document.setReviewedBy(principal.getId());
+                facilityDocumentRepository.save(document);
+            });
+        } else {
+            documents.forEach(document -> {
+                document.setVerified(false);
+                document.setReviewStatus("REJECTED");
+                document.setReviewNotes(notes);
+                document.setReviewedAt(Instant.now());
+                document.setReviewedBy(principal.getId());
+                facilityDocumentRepository.save(document);
+            });
+        }
         facility.setKycStatus(approved ? "VERIFIED" : "REJECTED");
         facility.setVerifiedAt(approved ? Instant.now() : null);
-        facility.setKycNotes(request.getNotes());
+        facility.setKycNotes(notes);
         FacilityProfile saved = facilityProfileRepository.save(facility);
 
         auditLogService.logEvent(principal.getId(), "ADMIN_FACILITY_KYC_REVIEWED", "FacilityProfile", saved.getId().toString(), null);
@@ -414,6 +526,9 @@ public class AdminService {
                                             .fileSizeBytes(d.getFileSizeBytes())
                                             .mimeType(d.getMimeType())
                                             .verified(d.isVerified())
+                                            .reviewStatus(d.getReviewStatus())
+                                            .reviewNotes(d.getReviewNotes())
+                                            .reviewedAt(d.getReviewedAt())
                                             .createdAt(d.getCreatedAt())
                                             .build())
                                     .collect(Collectors.toList())
@@ -1270,9 +1385,20 @@ public class AdminService {
                         .fileSizeBytes(d.getFileSizeBytes())
                         .mimeType(d.getMimeType())
                         .verified(d.isVerified())
+                        .reviewStatus(d.getReviewStatus())
+                        .reviewNotes(d.getReviewNotes())
+                        .reviewedAt(d.getReviewedAt())
                         .createdAt(d.getCreatedAt())
                         .build())
                 .collect(Collectors.toList());
+
+        String kycStatus = c.getKycStatus();
+        if (!"VERIFIED".equalsIgnoreCase(kycStatus) && !"REJECTED".equalsIgnoreCase(kycStatus)) {
+            boolean student = u != null && "STUDENT".equalsIgnoreCase(u.getCandidateLevel());
+            kycStatus = CandidateKycRequirements.hasRequiredDocuments(student,
+                    candidateDocumentRepository.findByCandidateId(c.getId()), c.getUniversityRegNo())
+                    ? "PENDING" : "DOCUMENTS_REQUIRED";
+        }
 
         return CandidateProfileDto.builder()
                 .id(c.getId())
@@ -1283,6 +1409,7 @@ public class AdminService {
                 .gender(c.getGender())
                 .dob(c.getDob())
                 .city(c.getCity())
+                .locality(c.getLocality())
                 .state(c.getState())
                 .pincode(c.getPincode())
                 .addressLine(c.getAddressLine())
@@ -1314,7 +1441,7 @@ public class AdminService {
                 .preferredCities(jsonToList(c.getPreferredCities()))
                 .openToWork(c.getOpenToWork())
                 .relocate(c.getRelocate())
-                .kycStatus(c.getKycStatus())
+                .kycStatus(kycStatus)
                 .kycNotes(c.getKycNotes())
                 .isMentor(Boolean.TRUE.equals(c.getIsMentor()))
                 .mentorStatus(c.getMentorStatus() != null ? c.getMentorStatus() : "NONE")
@@ -1350,6 +1477,9 @@ public class AdminService {
                                 .fileSizeBytes(d.getFileSizeBytes())
                                 .mimeType(d.getMimeType())
                                 .verified(d.isVerified())
+                                .reviewStatus(d.getReviewStatus())
+                                .reviewNotes(d.getReviewNotes())
+                                .reviewedAt(d.getReviewedAt())
                                 .createdAt(d.getCreatedAt())
                                 .build())
                         .collect(Collectors.toList());

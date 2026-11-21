@@ -43,13 +43,17 @@ public class FacilityOnboardingRequest {
     private String pincode;
     private String addressLine;
 
-    @Min(value = 1, message = "Facility must have at least 1 bed")
+    @Min(value = 0, message = "Beds cannot be negative")
     private int beds;
 
     private int icuBeds;
 
-    @NotBlank(message = "Clinical Establishment License number is required")
     private String licenseNumber;
+
+    private String groupName;
+    private String branchName;
+    private Boolean agreementAccepted;
+    private String agreementOtp;
 
     private String gst;
     private String nabhNumber;

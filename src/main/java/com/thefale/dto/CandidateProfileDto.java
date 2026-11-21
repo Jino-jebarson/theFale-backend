@@ -24,6 +24,7 @@ public class CandidateProfileDto {
     private String gender;
     private LocalDate dob;
     private String city;
+    private String locality;
     private String state;
     private String pincode;
     private String addressLine;
@@ -39,6 +40,7 @@ public class CandidateProfileDto {
     private String studyYear;
     private String universityRegNo;
     private Integer expectedGraduationYear;
+    private String expectedGraduationMonth;
 
     // Graduate indicators
     private String profession;
@@ -50,6 +52,8 @@ public class CandidateProfileDto {
     private String regNumber;
     private String regYear;
     private String experienceYears;
+    private List<CandidateExperienceDto> experienceHistory;
+    private List<CandidateCertificationDto> certifications;
     private String bio;
 
     // Compensation & preferences
@@ -64,7 +68,7 @@ public class CandidateProfileDto {
     private List<String> preferredCities;
     private Boolean openToWork;
     private Boolean relocate;
-    private String kycStatus; // PENDING, VERIFIED, REJECTED
+    private String kycStatus; // DOCUMENTS_REQUIRED, PENDING, VERIFIED, REJECTED
     private String kycNotes;
     private Boolean isMentor;
     private String mentorStatus;

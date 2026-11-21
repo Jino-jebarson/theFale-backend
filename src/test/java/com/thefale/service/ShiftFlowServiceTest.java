@@ -45,6 +45,7 @@ class ShiftFlowServiceTest {
     @Mock private PlatformSettingRepository platformSettingRepository;
     @Mock private NotificationRepository notificationRepository;
     @Mock private AuditLogService auditLogService;
+    @Mock private ReferralService referralService;
 
     // Additional mocks for AdminService
     @Mock private JobPostingRepository jobPostingRepository;
@@ -106,7 +107,8 @@ class ShiftFlowServiceTest {
                 notificationRepository,
                 userRepository,
                 auditLogService,
-                candidateDocumentRepository
+                candidateDocumentRepository,
+                referralService
         );
 
         adminService = new AdminService(
@@ -148,7 +150,8 @@ class ShiftFlowServiceTest {
                 candidateDocumentRepository,
                 notificationRepository,
                 auditLogService,
-                shiftClaimService
+                shiftClaimService,
+                referralService
         );
 
         facilityUserId = UUID.randomUUID();

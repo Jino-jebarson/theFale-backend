@@ -10,6 +10,7 @@ import com.thefale.entity.JobPosting;
 import com.thefale.entity.UnlockedCandidate;
 import com.thefale.entity.User;
 import com.thefale.exception.BadRequestException;
+import com.thefale.exception.ForbiddenException;
 import com.thefale.exception.ResourceNotFoundException;
 import com.thefale.repository.CandidateDocumentRepository;
 import com.thefale.repository.CandidateProfileRepository;
@@ -48,8 +49,10 @@ public class FacilityResdexService {
     @Transactional
     public List<CandidateResdexDto> searchCandidates(CustomUserPrincipal principal, String query, String specialty, String city) {
         FacilityProfile facility = facilityService.getOrCreateFacilityProfile(principal);
+        requireVerified(facility);
 
         return candidateProfileRepository.findAll().stream()
+                .filter(c -> "VERIFIED".equalsIgnoreCase(c.getKycStatus()))
                 .filter(c -> !Boolean.FALSE.equals(c.getOpenToWork()))
                 .filter(c -> {
                     if (query == null || query.isBlank()) return true;
@@ -68,6 +71,7 @@ public class FacilityResdexService {
     @Transactional
     public CandidateResdexDto unlockCandidate(CustomUserPrincipal principal, UUID candidateId) {
         FacilityProfile facility = facilityService.getOrCreateFacilityProfile(principal);
+        requireVerified(facility);
 
         CandidateProfile candidate = candidateProfileRepository.findById(candidateId)
                 .orElseThrow(() -> new ResourceNotFoundException("Candidate profile not found"));
@@ -105,6 +109,12 @@ public class FacilityResdexService {
         }
 
         return mapToResdexDto(candidate, facility);
+    }
+
+    private void requireVerified(FacilityProfile facility) {
+        if (!"VERIFIED".equalsIgnoreCase(facility.getKycStatus())) {
+            throw new ForbiddenException("Facility verification is required before viewing candidates.");
+        }
     }
 
     private CandidateResdexDto mapToResdexDto(CandidateProfile candidate, FacilityProfile facility) {

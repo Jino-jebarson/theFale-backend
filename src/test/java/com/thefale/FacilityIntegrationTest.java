@@ -16,9 +16,11 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.math.BigDecimal;
 import java.util.UUID;
+import java.time.Instant;
 
 import static org.hamcrest.Matchers.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -73,6 +75,12 @@ public class FacilityIntegrationTest {
     @Autowired
     private JwtTokenProvider jwtTokenProvider;
 
+    @Autowired
+    private OtpVerificationRepository otpVerificationRepository;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+
     private User facilityUser;
     private String facilityToken;
     private User candidateUser;
@@ -110,6 +118,9 @@ public class FacilityIntegrationTest {
                 .enabled(true)
                 .build());
 
+        otpVerificationRepository.save(OtpVerification.builder().contact(facilityUser.getPhone())
+                .otpHash(passwordEncoder.encode("123456")).expiresAt(Instant.now().plusSeconds(300)).build());
+
         // Create Candidate User & Profile
         candidateUser = userRepository.save(User.builder()
                 .phone("+91" + salt.substring(0, 4) + "2002")
@@ -142,6 +153,38 @@ public class FacilityIntegrationTest {
     }
 
     @Test
+    @DisplayName("V53 facility onboarding verifies the signing code and records the agreement")
+    void quickFacilityOnboardingRecordsSignedAgreement() throws Exception {
+        facilityUser.setPhone("+919876543210");
+        userRepository.save(facilityUser);
+        otpVerificationRepository.save(OtpVerification.builder().contact(facilityUser.getPhone())
+                .otpHash(passwordEncoder.encode("123456")).expiresAt(Instant.now().plusSeconds(300)).build());
+        FacilityOnboardingRequest request = FacilityOnboardingRequest.builder()
+                .hospitalName("Quick Hospital").facilityType("Clinic").city("Jayanagar").state("Karnataka")
+                .beds(0).contactPerson("Test Recruiter").designation("HR manager")
+                .contactPhone("+919876543210").contactEmail("hr@example.com")
+                .groupName("Example Group").branchName("Jayanagar")
+                .agreementAccepted(true).agreementOtp("123456").build();
+        request.setAgreementAccepted(false);
+        mockMvc.perform(post("/api/v1/facility/onboard")
+                        .header("Authorization", "Bearer " + facilityToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest());
+        request.setAgreementAccepted(true);
+        mockMvc.perform(post("/api/v1/facility/onboard")
+                        .header("Authorization", "Bearer " + facilityToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.beds").value(0))
+                .andExpect(jsonPath("$.data.contactPerson").value("Test Recruiter"))
+                .andExpect(jsonPath("$.data.groupName").value("Example Group"))
+                .andExpect(jsonPath("$.data.agreementVersion").value("v53-1"))
+                .andExpect(jsonPath("$.data.agreementAcceptedAt").exists());
+    }
+
+    @Test
     @DisplayName("Facility Onboarding, Profile Retrieval, and Institutional Bank Account Setup")
     void testFacilityOnboardingAndBankSetup() throws Exception {
         FacilityOnboardingRequest onboardReq = FacilityOnboardingRequest.builder()
@@ -159,6 +202,7 @@ public class FacilityIntegrationTest {
                 .contactPerson("Dr. Rajesh Kumar")
                 .contactPhone("+919876543210")
                 .contactEmail("admin@manipal.org")
+                .agreementAccepted(true).agreementOtp("123456")
                 .build();
 
         // 1. Onboard
@@ -211,6 +255,7 @@ public class FacilityIntegrationTest {
                 .contactPerson("Dr. Preetha Reddy")
                 .contactPhone("+919876543211")
                 .contactEmail("contact@apollo.org")
+                .agreementAccepted(true).agreementOtp("123456")
                 .build();
 
         mockMvc.perform(post("/api/v1/facility/onboard")
@@ -300,6 +345,7 @@ public class FacilityIntegrationTest {
                 .contactPerson("Dr. Ramesh Sen")
                 .contactPhone("+919876543212")
                 .contactEmail("contact@fortis.org")
+                .agreementAccepted(true).agreementOtp("123456")
                 .build();
 
         mockMvc.perform(post("/api/v1/facility/onboard")

@@ -48,6 +48,7 @@ public class HuddleService {
 
     @Transactional
     public HuddlePostDto createPost(CustomUserPrincipal principal, CreateHuddlePostRequest request) {
+        requireVerifiedHuddlePublisher(principal);
         // Enforce PHI / HIPAA / DISA Privacy Standards
         phiProtectionService.validateNoPhi(request.getTitle());
         phiProtectionService.validateNoPhi(request.getBody());
@@ -87,6 +88,7 @@ public class HuddleService {
         if (!post.getAuthorId().equals(principal.getId()) && !isAdmin) {
             throw new ForbiddenException("You can only edit your own posts.");
         }
+        if (!isAdmin) requireVerifiedHuddlePublisher(principal);
 
         if (request.getTitle() != null && !request.getTitle().isBlank()) {
             phiProtectionService.validateNoPhi(request.getTitle());
@@ -185,6 +187,7 @@ public class HuddleService {
 
     @Transactional
     public HuddleCommentDto addComment(CustomUserPrincipal principal, UUID postId, CreateHuddleCommentRequest request) {
+        requireVerifiedHuddlePublisher(principal);
         phiProtectionService.validateNoPhi(request.getContent());
 
         HuddlePost post = huddlePostRepository.findById(postId)
@@ -300,6 +303,7 @@ public class HuddleService {
 
     @Transactional
     public HuddleQuestionDto createQuestion(CustomUserPrincipal principal, CreateHuddleQuestionRequest request) {
+        requireVerifiedCandidate(principal, "Posting questions in Huddle requires verified candidate credentials.");
         phiProtectionService.validateNoPhi(request.getQuestionText());
 
         HuddleQuestion question = HuddleQuestion.builder()
@@ -351,6 +355,7 @@ public class HuddleService {
         if (!isAccreditedMentor(principal)) {
             throw new ForbiddenException("Only accredited clinical mentors with verified credentials can answer questions.");
         }
+        requireVerifiedCandidate(principal, "Verified credentials are required to answer Huddle questions.");
 
         HuddleQuestion question = huddleQuestionRepository.findById(questionId)
                 .orElseThrow(() -> new ResourceNotFoundException("Question not found"));
@@ -528,9 +533,13 @@ public class HuddleService {
     @Transactional
     public HuddleSessionDto createSession(CustomUserPrincipal principal, CreateHuddleSessionRequest request) {
         boolean isHospital = facilityProfileRepository.findByUserId(principal.getId()).isPresent();
+        if (isHospital) {
+            requireVerifiedFacility(principal, "Hospital verification is required before posting Huddle events or sessions.");
+        }
         if (!isHospital && !isAccreditedMentor(principal)) {
             throw new ForbiddenException("Only accredited clinical mentors or registered hospitals can conduct sessions.");
         }
+        if (!isHospital) requireVerifiedCandidate(principal, "Verified credentials are required before posting Huddle sessions.");
 
         // PHI and Content Safety Protection
         phiProtectionService.validateNoPhi(request.getTitle());
@@ -708,5 +717,36 @@ public class HuddleService {
                 .orElseGet(() -> mentorApplicationRepository.findByUserId(userId)
                         .map(MentorApplication::getSpecialty)
                         .orElse("Clinical Specialist"));
+    }
+
+    private void requireVerifiedHuddlePublisher(CustomUserPrincipal principal) {
+        if (isAdmin(principal)) return;
+        if (facilityProfileRepository.findByUserId(principal.getId()).isPresent()) {
+            requireVerifiedFacility(principal, "Hospital verification is required before posting or replying in Huddle.");
+            return;
+        }
+        requireVerifiedCandidate(principal, "Candidate verification is required before posting or replying in Huddle.");
+    }
+
+    private void requireVerifiedCandidate(CustomUserPrincipal principal, String message) {
+        if (isAdmin(principal)) return;
+        CandidateProfile candidate = candidateProfileRepository.findByUserId(principal.getId())
+                .orElseThrow(() -> new ForbiddenException("Complete candidate onboarding and verification before using Huddle."));
+        if (!"VERIFIED".equalsIgnoreCase(candidate.getKycStatus())) {
+            throw new ForbiddenException(message);
+        }
+    }
+
+    private void requireVerifiedFacility(CustomUserPrincipal principal, String message) {
+        FacilityProfile facility = facilityProfileRepository.findByUserId(principal.getId())
+                .orElseThrow(() -> new ForbiddenException("Complete hospital onboarding and verification before using Huddle."));
+        if (!"VERIFIED".equalsIgnoreCase(facility.getKycStatus())) {
+            throw new ForbiddenException(message);
+        }
+    }
+
+    private boolean isAdmin(CustomUserPrincipal principal) {
+        return principal != null && principal.getAuthorities() != null
+                && principal.getAuthorities().stream().anyMatch(a -> "ROLE_ADMIN".equals(a.getAuthority()));
     }
 }

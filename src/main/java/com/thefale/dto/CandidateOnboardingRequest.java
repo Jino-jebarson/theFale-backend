@@ -35,6 +35,9 @@ public class CandidateOnboardingRequest {
     @jakarta.validation.constraints.Size(max = 100, message = "City must not exceed 100 characters")
     private String city;
 
+    @jakarta.validation.constraints.Size(max = 100, message = "Area must not exceed 100 characters")
+    private String locality;
+
     private String state;
     private String pincode;
     private String addressLine;
@@ -49,6 +52,8 @@ public class CandidateOnboardingRequest {
     private String studyYear; // 1st, 2nd, 3rd, 4th, Intern
     private String universityRegNo;
     private Integer expectedGraduationYear;
+    @jakarta.validation.constraints.Pattern(regexp = "^\\d{4}-(0[1-9]|1[0-2])$", message = "Expected graduation month must use YYYY-MM format")
+    private String expectedGraduationMonth;
 
     // Graduate fields
     private String profession;
@@ -79,6 +84,9 @@ public class CandidateOnboardingRequest {
     private List<String> preferredCities;
     private List<String> skills;
     private List<String> languages;
+
+    @jakarta.validation.constraints.Size(max = 12, message = "Referral code is invalid")
+    private String referralCode;
 
     public Long getExpectedSalaryMinPaise() {
         if (expectedSalaryMinPaise != null) {

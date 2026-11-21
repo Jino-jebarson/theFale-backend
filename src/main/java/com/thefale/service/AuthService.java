@@ -6,6 +6,7 @@ import com.thefale.entity.OtpVerification;
 import com.thefale.entity.RefreshToken;
 import com.thefale.entity.User;
 import com.thefale.exception.BadRequestException;
+import com.thefale.exception.ResourceNotFoundException;
 import com.thefale.exception.UnauthorizedException;
 import com.thefale.repository.OtpVerificationRepository;
 import com.thefale.repository.RefreshTokenRepository;
@@ -151,6 +152,30 @@ public class AuthService {
         }
 
         return generateTokensAndSetCookie(user, httpResponse);
+    }
+
+    /** Consume a fresh phone code before recording a facility's agreement acceptance. */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW,
+            noRollbackFor = BadRequestException.class)
+    public void verifyFacilityAgreementCode(CustomUserPrincipal principal, String code) {
+        User user = userRepository.findById(principal.getId())
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+        if (!"ROLE_FACILITY".equals(user.getRole()) || user.getPhone() == null) {
+            throw new BadRequestException("A verified facility phone number is required to sign.");
+        }
+        OtpVerification verification = otpVerificationRepository
+                .findTopByContactAndVerifiedFalseOrderByCreatedAtDesc(user.getPhone())
+                .orElseThrow(() -> new BadRequestException("Request a signing code first."));
+        if (Instant.now().isAfter(verification.getExpiresAt()) || verification.getAttempts() >= 5) {
+            throw new BadRequestException("Signing code expired. Please request a new code.");
+        }
+        verification.setAttempts(verification.getAttempts() + 1);
+        if (code == null || !passwordEncoder.matches(code, verification.getOtpHash())) {
+            otpVerificationRepository.save(verification);
+            throw new BadRequestException("Invalid signing code.");
+        }
+        verification.setVerified(true);
+        otpVerificationRepository.save(verification);
     }
 
     @Transactional

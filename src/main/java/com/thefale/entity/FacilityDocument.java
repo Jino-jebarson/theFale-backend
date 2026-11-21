@@ -42,6 +42,19 @@ public class FacilityDocument {
     @Column(nullable = false)
     private boolean verified = false;
 
+    @Builder.Default
+    @Column(name = "review_status", nullable = false, length = 20)
+    private String reviewStatus = "PENDING";
+
+    @Column(name = "review_notes", columnDefinition = "TEXT")
+    private String reviewNotes;
+
+    @Column(name = "reviewed_at")
+    private Instant reviewedAt;
+
+    @Column(name = "reviewed_by")
+    private UUID reviewedBy;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;

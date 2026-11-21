@@ -82,6 +82,10 @@ public class JobService {
         CandidateProfile candidate = candidateProfileRepository.findByUserId(principal.getId())
                 .orElseThrow(() -> new ResourceNotFoundException("Candidate profile not found. Please complete onboarding."));
 
+        if (!"VERIFIED".equalsIgnoreCase(candidate.getKycStatus())) {
+            throw new ForbiddenException("Complete identity and credential verification before applying for jobs.");
+        }
+
         JobPosting job = jobPostingRepository.findById(jobId)
                 .orElseThrow(() -> new ResourceNotFoundException("Job posting not found"));
 
@@ -250,6 +254,7 @@ public class JobService {
                 .status(app.getStatus())
                 .matchScore(canonicalScore)
                 .appliedAt(app.getAppliedAt())
+                .updatedAt(app.getUpdatedAt())
                 .interviewScheduledAt(app.getInterviewScheduledAt())
                 .interviewLocationOrLink(app.getInterviewLocationOrLink())
                 .withdrawalReason(app.getWithdrawalReason())
