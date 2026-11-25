@@ -47,6 +47,10 @@ public class User {
     private String candidateLevel; // STUDENT, FRESHER, PROFESSIONAL
 
     @Builder.Default
+    @Column(name = "preferred_language", nullable = false, length = 12)
+    private String preferredLanguage = "en";
+
+    @Builder.Default
     @Column(nullable = false, length = 30)
     private String status = "ACTIVE"; // ACTIVE, SUSPENDED, LOCKED
 

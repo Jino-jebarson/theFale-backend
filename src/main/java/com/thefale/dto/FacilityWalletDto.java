@@ -19,5 +19,6 @@ public class FacilityWalletDto {
     private long lockedEscrowBalancePaise;
     private long totalDisbursedPaise;
     private int candidateCredits;
+    private boolean welcomeCreditsGranted;
     private Instant updatedAt;
 }

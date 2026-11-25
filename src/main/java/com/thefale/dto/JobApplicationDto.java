@@ -26,6 +26,7 @@ public class JobApplicationDto {
     private String department;
     private String city;
     private String status;
+    private boolean firstHireFeeWaived;
     private int matchScore;
     private Instant appliedAt;
     private Instant updatedAt;

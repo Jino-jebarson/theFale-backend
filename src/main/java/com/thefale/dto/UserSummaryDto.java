@@ -19,9 +19,11 @@ public class UserSummaryDto {
     private String username;
     private String role;
     private String candidateLevel;
+    private String preferredLanguage;
     @JsonProperty("onboarded")
     private boolean isOnboarded;
     private String status;
+    private boolean passwordConfigured;
 
     @JsonProperty("onboarded")
     public boolean isOnboarded() {

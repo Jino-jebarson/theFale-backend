@@ -239,9 +239,56 @@ public class AuthService {
                 .username(user.getUsername())
                 .role(user.getRole())
                 .candidateLevel(user.getCandidateLevel())
+                .preferredLanguage(user.getPreferredLanguage())
                 .isOnboarded(user.isOnboarded())
                 .status(user.getStatus())
+                .passwordConfigured(user.getPasswordHash() != null && !user.getPasswordHash().isBlank())
                 .build();
+    }
+
+    @Transactional
+    public UserSummaryDto updatePreferredLanguage(CustomUserPrincipal principal, PreferredLanguageUpdateRequest request) {
+        if (principal == null || principal.getId() == null) {
+            throw new UnauthorizedException("User is not authenticated.");
+        }
+        User user = userRepository.findById(principal.getId())
+                .orElseThrow(() -> new UnauthorizedException("User account not found."));
+        user.setPreferredLanguage(request.getPreferredLanguage());
+        userRepository.save(user);
+        return UserSummaryDto.builder()
+                .id(user.getId())
+                .phone(user.getPhone())
+                .email(user.getEmail())
+                .username(user.getUsername())
+                .role(user.getRole())
+                .candidateLevel(user.getCandidateLevel())
+                .preferredLanguage(user.getPreferredLanguage())
+                .isOnboarded(user.isOnboarded())
+                .status(user.getStatus())
+                .passwordConfigured(user.getPasswordHash() != null && !user.getPasswordHash().isBlank())
+                .build();
+    }
+
+    @Transactional
+    public void updateFacilityPassword(CustomUserPrincipal principal, FacilityPasswordUpdateRequest request) {
+        if (principal == null || principal.getId() == null) {
+            throw new UnauthorizedException("User is not authenticated.");
+        }
+        User user = userRepository.findById(principal.getId())
+                .orElseThrow(() -> new UnauthorizedException("User account not found."));
+        if (!"ROLE_FACILITY".equals(user.getRole())) {
+            throw new UnauthorizedException("Only facility accounts can update this password.");
+        }
+        boolean hasPassword = user.getPasswordHash() != null && !user.getPasswordHash().isBlank();
+        if (hasPassword && (request.getCurrentPassword() == null
+                || !passwordEncoder.matches(request.getCurrentPassword(), user.getPasswordHash()))) {
+            throw new UnauthorizedException("Your current password is incorrect.");
+        }
+        if (request.getNewPassword() == null || request.getNewPassword().length() < 8) {
+            throw new BadRequestException("Password must be at least 8 characters.");
+        }
+        user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
+        userRepository.save(user);
     }
 
     @Transactional
@@ -258,6 +305,22 @@ public class AuthService {
         }
 
         return generateTokensAndSetCookie(admin, httpResponse);
+    }
+
+    @Transactional
+    public AuthResponse facilityPasswordLogin(FacilityPasswordLoginRequest request, HttpServletResponse httpResponse) {
+        String cleanPhone = normalizePhone(request.getPhone());
+        User facility = userRepository.findByPhone(cleanPhone)
+                .orElseThrow(() -> new UnauthorizedException("Invalid mobile number or password."));
+
+        if (!"ROLE_FACILITY".equals(facility.getRole()) || facility.getPasswordHash() == null
+                || !passwordEncoder.matches(request.getPassword(), facility.getPasswordHash())) {
+            throw new UnauthorizedException("Invalid mobile number or password.");
+        }
+        if (!"ACTIVE".equalsIgnoreCase(facility.getStatus())) {
+            throw new UnauthorizedException("This account is locked or suspended. Please sign in with OTP or contact support.");
+        }
+        return generateTokensAndSetCookie(facility, httpResponse);
     }
 
     @Transactional
@@ -353,8 +416,10 @@ public class AuthService {
                 .username(user.getUsername())
                 .role(user.getRole())
                 .candidateLevel(user.getCandidateLevel())
+                .preferredLanguage(user.getPreferredLanguage())
                 .isOnboarded(user.isOnboarded())
                 .status(user.getStatus())
+                .passwordConfigured(user.getPasswordHash() != null && !user.getPasswordHash().isBlank())
                 .build();
 
         return AuthResponse.builder()

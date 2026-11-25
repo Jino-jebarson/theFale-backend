@@ -40,6 +40,10 @@ public class FacilityWallet {
     @Column(name = "candidate_credits", nullable = false)
     private int candidateCredits = 0;
 
+    @Builder.Default
+    @Column(name = "welcome_credits_granted", nullable = false)
+    private boolean welcomeCreditsGranted = false;
+
     @Column(name = "first_completed_shift_id")
     private UUID firstCompletedShiftId;
 

@@ -26,11 +26,13 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -38,6 +40,8 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class FacilityService {
+
+    private static final int NEW_FACILITY_WELCOME_CREDITS = 3;
 
     private final FacilityProfileRepository facilityProfileRepository;
     private final FacilityDocumentRepository facilityDocumentRepository;
@@ -47,6 +51,7 @@ public class FacilityService {
     private final AuditLogService auditLogService;
     private final ObjectMapper objectMapper;
     private final AuthService authService;
+    private final PasswordEncoder passwordEncoder;
 
     @Transactional(readOnly = true)
     public FacilityProfile getOrCreateFacilityProfile(CustomUserPrincipal principal) {
@@ -64,12 +69,14 @@ public class FacilityService {
         }
 
         facility.setHospitalName(request.getHospitalName().trim());
-        facility.setFacilityType(request.getFacilityType().trim());
+        facility.setFacilityType(request.getFacilityType() == null || request.getFacilityType().isBlank()
+                ? null : request.getFacilityType().trim());
         facility.setSize(request.getSize());
         facility.setAbout(request.getAbout());
         facility.setWebsite(request.getWebsite());
-        facility.setCity(request.getCity().trim());
-        facility.setState(request.getState().trim());
+        facility.setArea(request.getArea() == null || request.getArea().isBlank() ? null : request.getArea().trim());
+        facility.setCity(request.getCity() == null || request.getCity().isBlank() ? null : request.getCity().trim());
+        facility.setState(request.getState() == null || request.getState().isBlank() ? null : request.getState().trim());
         facility.setPincode(request.getPincode());
         facility.setAddressLine(request.getAddressLine());
         facility.setBeds(request.getBeds());
@@ -78,9 +85,13 @@ public class FacilityService {
         facility.setGroupName(request.getGroupName());
         facility.setBranchName(request.getBranchName());
         if (Boolean.TRUE.equals(request.getAgreementAccepted())) {
-            authService.verifyFacilityAgreementCode(principal, request.getAgreementOtp());
+            // The authenticated facility session already proves control of its verified phone.
+            // Keep validating a signing code when older clients still send one.
+            if (request.getAgreementOtp() != null && !request.getAgreementOtp().isBlank()) {
+                authService.verifyFacilityAgreementCode(principal, request.getAgreementOtp());
+            }
             facility.setAgreementAcceptedAt(Instant.now());
-            facility.setAgreementVersion("v53-1");
+            facility.setAgreementVersion("v53-2");
             facility.setAgreementAcceptedBy(request.getContactPerson().trim());
         }
         facility.setGst(request.getGst());
@@ -88,8 +99,10 @@ public class FacilityService {
         facility.setAccreditationLevel(request.getAccreditationLevel());
         facility.setContactPerson(request.getContactPerson().trim());
         facility.setDesignation(request.getDesignation());
-        facility.setContactPhone(request.getContactPhone().trim());
-        facility.setContactEmail(request.getContactEmail().trim().toLowerCase());
+        facility.setContactPhone(principal.getPhone());
+        facility.setContactEmail(request.getContactEmail() == null || request.getContactEmail().isBlank()
+                ? principal.getEmail()
+                : request.getContactEmail().trim().toLowerCase());
         facility.setDepartments(listToJson(request.getDepartments()));
         facility.setHiringNeeds(listToJson(request.getHiringNeeds()));
         facility.setLogoUrl(request.getLogoUrl());
@@ -100,21 +113,30 @@ public class FacilityService {
 
         FacilityProfile saved = facilityProfileRepository.save(facility);
 
-        // New wallets start empty; purchased credits come from confirmed transactions.
+        // Grant the launch offer once, only when a new facility wallet is created.
         if (facilityWalletRepository.findByFacilityId(saved.getId()).isEmpty()) {
             FacilityWallet wallet = FacilityWallet.builder()
                     .facilityId(saved.getId())
                     .availableBalance(BigDecimal.ZERO)
                     .lockedEscrowBalance(BigDecimal.ZERO)
                     .totalDisbursed(BigDecimal.ZERO)
-                    .candidateCredits(0)
+                    .candidateCredits(NEW_FACILITY_WELCOME_CREDITS)
+                    .welcomeCreditsGranted(true)
                     .build();
-            facilityWalletRepository.save(wallet);
+            FacilityWallet welcomeWallet = facilityWalletRepository.save(wallet);
+            auditLogService.logEvent(principal.getId(), "FACILITY_WELCOME_CREDITS_GRANTED", "FacilityWallet",
+                    welcomeWallet.getId().toString(), Map.of("credits", NEW_FACILITY_WELCOME_CREDITS));
         }
 
         // Mark user as onboarded
         User user = userRepository.findById(principal.getId())
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+        if (request.getPassword() != null && !request.getPassword().isBlank()) {
+            if (!"ROLE_FACILITY".equals(user.getRole())) {
+                throw new BadRequestException("Only facility accounts can set a sign-in password.");
+            }
+            user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
+        }
         user.setOnboarded(true);
         userRepository.save(user);
 
@@ -160,11 +182,20 @@ public class FacilityService {
         if (request.getSize() != null) {
             facility.setSize(request.getSize().trim());
         }
+        if (request.getBranchName() != null) {
+            facility.setBranchName(request.getBranchName().trim());
+        }
+        if (request.getGroupName() != null) {
+            facility.setGroupName(request.getGroupName().trim());
+        }
         if (request.getAbout() != null) {
             facility.setAbout(request.getAbout().trim());
         }
         if (request.getWebsite() != null) {
             facility.setWebsite(request.getWebsite().trim());
+        }
+        if (request.getArea() != null && !request.getArea().isBlank()) {
+            facility.setArea(request.getArea().trim());
         }
         if (request.getCity() != null && !request.getCity().isBlank()) {
             facility.setCity(request.getCity().trim());
@@ -301,6 +332,7 @@ public class FacilityService {
                 .size(f.getSize())
                 .about(f.getAbout())
                 .website(f.getWebsite())
+                .area(f.getArea())
                 .city(f.getCity())
                 .state(f.getState())
                 .pincode(f.getPincode())
@@ -329,6 +361,7 @@ public class FacilityService {
                 .kycNotes(f.getKycNotes())
                 .verifiedAt(f.getVerifiedAt())
                 .createdAt(f.getCreatedAt())
+                .firstHireFreeAvailable(!f.isFirstHireFreeUsed())
                 .build();
     }
 

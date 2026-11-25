@@ -3,10 +3,9 @@ package com.thefale.dto;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonSetter;
 import com.fasterxml.jackson.databind.JsonNode;
-import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -27,17 +26,17 @@ public class FacilityOnboardingRequest {
     @NotBlank(message = "Hospital name is required")
     private String hospitalName;
 
-    @NotBlank(message = "Facility type is required")
     private String facilityType;
 
     private String size;
     private String about;
     private String website;
 
-    @NotBlank(message = "City is required")
+    @Size(max = 80, message = "Area must be 80 characters or fewer")
+    private String area;
+
     private String city;
 
-    @NotBlank(message = "State is required")
     private String state;
 
     private String pincode;
@@ -55,6 +54,9 @@ public class FacilityOnboardingRequest {
     private Boolean agreementAccepted;
     private String agreementOtp;
 
+    @Size(min = 8, max = 100, message = "Password must be at least 8 characters")
+    private String password;
+
     private String gst;
     private String nabhNumber;
     private String accreditationLevel;
@@ -64,12 +66,8 @@ public class FacilityOnboardingRequest {
 
     private String designation;
 
-    @NotBlank(message = "Contact phone is required")
-    @Pattern(regexp = "^\\+91[6-9]\\d{9}$", message = "Phone must be a valid E.164 Indian mobile number")
     private String contactPhone;
 
-    @NotBlank(message = "Contact email is required")
-    @Email(message = "Invalid email format")
     private String contactEmail;
 
     private java.util.List<String> departments;

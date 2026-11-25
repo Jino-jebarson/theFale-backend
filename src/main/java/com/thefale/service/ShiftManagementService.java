@@ -81,7 +81,6 @@ public class ShiftManagementService {
     @Transactional
     public LocumShiftDto postShift(CustomUserPrincipal principal, PostShiftRequest request) {
         FacilityProfile facility = facilityService.getOrCreateFacilityProfile(principal);
-        if (!"VERIFIED".equalsIgnoreCase(facility.getKycStatus())) throw new BadRequestException("Hospital verification is required before posting shifts.");
 
         if (hospitalBankAccountRepository.findByFacilityId(facility.getId()).filter(a -> "Verified".equalsIgnoreCase(a.getStatus())).isEmpty()) {
             throw new BadRequestException("Hospital settlement bank account must be linked and verified before broadcasting locum shifts (required for escrow custody and refunds).");
@@ -148,10 +147,11 @@ public class ShiftManagementService {
                     .build());
         }
 
-        // First-shift Admin gate: 1st shift (or unverified KYC facility) needs Admin approval;
-        // 2nd+ shift goes OPEN immediately once bank, wage floor, and escrow checks pass.
+        // Unverified facilities and first shifts go to Admin review. Verified returning
+        // facilities can publish immediately once bank, wage floor, and escrow checks pass.
         long priorApprovedCount = locumShiftRepository.countApprovedShiftsByFacility(facility.getId());
-        boolean autoApprove = facility.isFirstShiftApproved() || priorApprovedCount > 0;
+        boolean kycVerified = "VERIFIED".equalsIgnoreCase(facility.getKycStatus());
+        boolean autoApprove = kycVerified && (facility.isFirstShiftApproved() || priorApprovedCount > 0);
         String initialStatus = autoApprove ? "OPEN" : "PENDING_APPROVAL";
 
         LocumShift shift = LocumShift.builder()
@@ -189,9 +189,6 @@ public class ShiftManagementService {
     @Transactional
     public LocumShiftDto updateShift(CustomUserPrincipal principal, UUID shiftId, PostShiftRequest request) {
         FacilityProfile facility = facilityService.getOrCreateFacilityProfile(principal);
-        if (!"VERIFIED".equalsIgnoreCase(facility.getKycStatus())) {
-            throw new ForbiddenException("Hospital verification is required before publishing or updating shifts.");
-        }
 
         LocumShift shift = locumShiftRepository.findByIdWithLock(shiftId)
                 .orElseThrow(() -> new ResourceNotFoundException("Locum shift not found"));
@@ -202,6 +199,9 @@ public class ShiftManagementService {
 
         if (!Set.of("PENDING_APPROVAL", "OPEN", "FILLED").contains(shift.getStatus().toUpperCase())) {
             throw new BadRequestException("Cannot update shift in status " + shift.getStatus());
+        }
+        if (!"VERIFIED".equalsIgnoreCase(facility.getKycStatus()) && !"PENDING_APPROVAL".equalsIgnoreCase(shift.getStatus())) {
+            throw new ForbiddenException("Only shifts awaiting Admin review can be updated while hospital verification is pending.");
         }
 
         ShiftRules.validateDetails(request.getDetails());

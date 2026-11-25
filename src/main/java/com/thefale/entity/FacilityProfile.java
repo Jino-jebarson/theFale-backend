@@ -27,7 +27,7 @@ public class FacilityProfile {
     @Column(name = "hospital_name", nullable = false, length = 150)
     private String hospitalName;
 
-    @Column(name = "facility_type", nullable = false, length = 50)
+    @Column(name = "facility_type", length = 50)
     private String facilityType;
 
     @Column(length = 50)
@@ -39,10 +39,13 @@ public class FacilityProfile {
     @Column(length = 255)
     private String website;
 
-    @Column(nullable = false, length = 50)
+    @Column(length = 80)
+    private String area;
+
+    @Column(length = 50)
     private String city;
 
-    @Column(nullable = false, length = 50)
+    @Column(length = 50)
     private String state;
 
     @Column(length = 10)
@@ -94,7 +97,7 @@ public class FacilityProfile {
     @Column(name = "contact_phone", nullable = false, length = 15)
     private String contactPhone;
 
-    @Column(name = "contact_email", nullable = false, length = 150)
+    @Column(name = "contact_email", length = 150)
     private String contactEmail;
 
     @Column(columnDefinition = "TEXT")
@@ -121,6 +124,13 @@ public class FacilityProfile {
 
     @Column(name = "first_shift_approved", nullable = false)
     private boolean firstShiftApproved;
+
+    @Builder.Default
+    @Column(name = "first_hire_free_used", nullable = false)
+    private boolean firstHireFreeUsed = false;
+
+    @Column(name = "first_hire_free_application_id")
+    private UUID firstHireFreeApplicationId;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)

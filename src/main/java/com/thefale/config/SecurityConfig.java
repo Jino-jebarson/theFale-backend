@@ -69,7 +69,7 @@ public class SecurityConfig {
                         .frameOptions(frame -> frame.deny())
                         .contentTypeOptions(contentType -> {})
                         .referrerPolicy(referrer -> referrer.policy(ReferrerPolicyHeaderWriter.ReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN))
-                        .contentSecurityPolicy(csp -> csp.policyDirectives("default-src 'self'"))
+                        .contentSecurityPolicy(csp -> csp.policyDirectives("default-src 'self'; img-src 'self' data: blob:"))
                 )
                 // Deny by default: Whitelist only public authentication and documentation endpoints
                 .authorizeHttpRequests(auth -> auth
@@ -81,6 +81,7 @@ public class SecurityConfig {
                         .requestMatchers(
                                 "/api/v1/auth/otp/send",
                                 "/api/v1/auth/otp/verify",
+                                "/api/v1/auth/facility/login",
                                 "/api/v1/auth/refresh",
                                 "/api/v1/auth/admin/login",
                                 "/api/v1/auth/admin/signup",

@@ -21,7 +21,7 @@ class FacilityVerificationGateTest {
         FacilityProfileRepository profiles = mock(FacilityProfileRepository.class);
         CustomUserPrincipal principal = CustomUserPrincipal.builder().id(UUID.randomUUID()).build();
         when(profiles.findByUserId(principal.getId())).thenReturn(Optional.empty());
-        FacilityService service = new FacilityService(profiles, null, null, null, null, null, null, null);
+        FacilityService service = new FacilityService(profiles, null, null, null, null, null, null, null, null);
         assertThatThrownBy(() -> service.onboard(principal, FacilityOnboardingRequest.builder().build()))
                 .isInstanceOf(BadRequestException.class).hasMessageContaining("agreement");
         verify(profiles, never()).save(any());

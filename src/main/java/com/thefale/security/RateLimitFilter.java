@@ -36,6 +36,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
             allowed = rateLimitService.tryConsumeOtpSend(clientIp);
         } else if (path.equals("/api/v1/auth/otp/verify")) {
             allowed = rateLimitService.tryConsumeOtpVerify(clientIp);
+        } else if (path.equals("/api/v1/auth/facility/login")) {
+            allowed = rateLimitService.tryConsumeFacilityPasswordLogin(clientIp);
         } else if (path.startsWith("/api/")) {
             allowed = rateLimitService.tryConsumeGlobal(clientIp);
         }

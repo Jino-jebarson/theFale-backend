@@ -5,10 +5,13 @@ import com.thefale.dto.FacilityDocumentDto;
 import com.thefale.dto.FacilityDocumentUploadRequest;
 import com.thefale.dto.FacilityOnboardingRequest;
 import com.thefale.dto.FacilityProfileDto;
+import com.thefale.dto.FacilityTeamInviteDto;
+import com.thefale.dto.FacilityTeamInviteRequest;
 import com.thefale.dto.HospitalBankAccountDto;
 import com.thefale.dto.UpdateHospitalBankRequest;
 import com.thefale.security.CustomUserPrincipal;  
 import com.thefale.service.FacilityService;
+import com.thefale.service.FacilityTeamService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -28,6 +31,7 @@ import java.util.UUID;
 public class FacilityController {
 
     private final FacilityService facilityService;
+    private final FacilityTeamService facilityTeamService;
 
     @PostMapping("/onboard")
     @PreAuthorize("hasRole('FACILITY')")
@@ -110,5 +114,32 @@ public class FacilityController {
             @PathVariable UUID id) {
         facilityService.deleteFacilityDocument(principal, id);
         return ResponseEntity.ok(ApiResponse.success("Facility document deleted successfully"));
+    }
+
+    @GetMapping("/team")
+    @PreAuthorize("hasRole('FACILITY')")
+    @Operation(summary = "List facility team invitations")
+    public ResponseEntity<ApiResponse<List<FacilityTeamInviteDto>>> listTeam(
+            @AuthenticationPrincipal CustomUserPrincipal principal) {
+        return ResponseEntity.ok(ApiResponse.success(facilityTeamService.list(principal)));
+    }
+
+    @PostMapping("/team")
+    @PreAuthorize("hasRole('FACILITY')")
+    @Operation(summary = "Create a facility team invitation")
+    public ResponseEntity<ApiResponse<FacilityTeamInviteDto>> inviteTeamMember(
+            @AuthenticationPrincipal CustomUserPrincipal principal,
+            @Valid @RequestBody FacilityTeamInviteRequest request) {
+        return ResponseEntity.ok(ApiResponse.success("Team invitation created", facilityTeamService.invite(principal, request)));
+    }
+
+    @DeleteMapping("/team/{id}")
+    @PreAuthorize("hasRole('FACILITY')")
+    @Operation(summary = "Remove a facility team invitation")
+    public ResponseEntity<ApiResponse<Void>> removeTeamMember(
+            @AuthenticationPrincipal CustomUserPrincipal principal,
+            @PathVariable UUID id) {
+        facilityTeamService.remove(principal, id);
+        return ResponseEntity.ok(ApiResponse.success("Team invitation removed"));
     }
 }

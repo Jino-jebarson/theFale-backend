@@ -209,6 +209,7 @@ public class FacilityWalletService {
                 .lockedEscrowBalancePaise(w.getLockedEscrowBalance().multiply(BigDecimal.valueOf(100)).longValue())
                 .totalDisbursedPaise(w.getTotalDisbursed().multiply(BigDecimal.valueOf(100)).longValue())
                 .candidateCredits(w.getCandidateCredits())
+                .welcomeCreditsGranted(w.isWelcomeCreditsGranted())
                 .updatedAt(w.getUpdatedAt())
                 .build();
     }

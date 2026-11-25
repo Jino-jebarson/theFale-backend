@@ -38,6 +38,25 @@ public class AuthController {
         return ResponseEntity.ok(ApiResponse.success("Authentication successful", authResponse));
     }
 
+    @PostMapping("/facility/login")
+    @Operation(summary = "Sign in to a facility account with mobile number and password")
+    public ResponseEntity<ApiResponse<AuthResponse>> facilityPasswordLogin(
+            @Valid @RequestBody FacilityPasswordLoginRequest request,
+            HttpServletResponse response
+    ) {
+        AuthResponse authResponse = authService.facilityPasswordLogin(request, response);
+        return ResponseEntity.ok(ApiResponse.success("Facility sign-in successful", authResponse));
+    }
+
+    @PutMapping("/facility/password")
+    @Operation(summary = "Set or update the authenticated facility account password")
+    public ResponseEntity<ApiResponse<Void>> updateFacilityPassword(
+            @AuthenticationPrincipal CustomUserPrincipal principal,
+            @Valid @RequestBody FacilityPasswordUpdateRequest request) {
+        authService.updateFacilityPassword(principal, request);
+        return ResponseEntity.ok(ApiResponse.success("Facility password updated successfully"));
+    }
+
     @PostMapping("/refresh")
     @Operation(summary = "Rotate refresh token and issue a fresh access token")
     public ResponseEntity<ApiResponse<AuthResponse>> refreshToken(
@@ -64,6 +83,16 @@ public class AuthController {
             @AuthenticationPrincipal CustomUserPrincipal principal
     ) {
         UserSummaryDto userSummary = authService.getCurrentUserSummary(principal);
+        return ResponseEntity.ok(ApiResponse.success(userSummary));
+    }
+
+    @PatchMapping("/me/language")
+    @Operation(summary = "Save the authenticated user's preferred interface language")
+    public ResponseEntity<ApiResponse<UserSummaryDto>> updatePreferredLanguage(
+            @AuthenticationPrincipal CustomUserPrincipal principal,
+            @Valid @RequestBody PreferredLanguageUpdateRequest request
+    ) {
+        UserSummaryDto userSummary = authService.updatePreferredLanguage(principal, request);
         return ResponseEntity.ok(ApiResponse.success(userSummary));
     }
 

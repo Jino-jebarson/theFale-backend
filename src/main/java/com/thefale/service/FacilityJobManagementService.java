@@ -47,10 +47,6 @@ public class FacilityJobManagementService {
     public JobPostingDto postJob(CustomUserPrincipal principal, PostJobRequest request) {
         FacilityProfile facility = facilityService.getOrCreateFacilityProfile(principal);
 
-        if (!"VERIFIED".equalsIgnoreCase(facility.getKycStatus())) {
-            throw new ForbiddenException("Hospital verification is required before publishing jobs.");
-        }
-
         if (request.getSalaryMinPaise() > request.getSalaryMaxPaise()) {
             throw new BadRequestException("Minimum salary cannot exceed maximum salary");
         }
@@ -313,6 +309,18 @@ public class FacilityJobManagementService {
         }
 
         application.setStatus(targetStatus);
+        if ("HIRED".equalsIgnoreCase(targetStatus)) {
+            FacilityProfile lockedFacility = facilityProfileRepository.findByIdWithLock(facility.getId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Facility profile not found"));
+            if (!application.isFirstHireFeeWaived() && !lockedFacility.isFirstHireFreeUsed()) {
+                lockedFacility.setFirstHireFreeUsed(true);
+                lockedFacility.setFirstHireFreeApplicationId(application.getId());
+                facilityProfileRepository.save(lockedFacility);
+                application.setFirstHireFeeWaived(true);
+                auditLogService.logEvent(principal.getId(), "FIRST_HIRE_PLACEMENT_FEE_WAIVED", "JobApplication",
+                        application.getId().toString(), java.util.Map.of("facilityId", facility.getId().toString()));
+            }
+        }
         if (request.getInterviewScheduledAt() != null) {
             application.setInterviewScheduledAt(request.getInterviewScheduledAt());
         }
@@ -368,9 +376,22 @@ public class FacilityJobManagementService {
             String notifTitle = "REJECTED".equalsIgnoreCase(targetStatus)
                     ? "Application Update: " + job.getTitle()
                     : "Application Update: " + targetStatus;
-            String notifMessage = "REJECTED".equalsIgnoreCase(targetStatus)
-                    ? "Thank you for interviewing for " + job.getTitle() + " at " + facility.getHospitalName() + ". At this time, the hospital has decided to proceed with other candidates. Your verified credentials remain active for other hospital openings."
-                    : "Your application for " + job.getTitle() + " at " + facility.getHospitalName() + " has advanced to " + targetStatus + ".";
+            String notifMessage;
+            if ("REJECTED".equalsIgnoreCase(targetStatus)) {
+                notifMessage = "Thank you for interviewing for " + job.getTitle() + " at " + facility.getHospitalName() + ". At this time, the hospital has decided to proceed with other candidates. Your verified credentials remain active for other hospital openings.";
+            } else if ("INTERVIEW".equalsIgnoreCase(targetStatus) && application.getInterviewScheduledAt() != null) {
+                String interviewTime = java.time.format.DateTimeFormatter
+                        .ofPattern("EEE, dd MMM yyyy 'at' hh:mm a")
+                        .withZone(java.time.ZoneId.of("Asia/Kolkata"))
+                        .format(application.getInterviewScheduledAt());
+                String meetingDetails = application.getInterviewLocationOrLink() == null || application.getInterviewLocationOrLink().isBlank()
+                        ? ""
+                        : " Details: " + application.getInterviewLocationOrLink();
+                notifMessage = "Your interview for " + job.getTitle() + " at " + facility.getHospitalName()
+                        + " is scheduled for " + interviewTime + "." + meetingDetails;
+            } else {
+                notifMessage = "Your application for " + job.getTitle() + " at " + facility.getHospitalName() + " has advanced to " + targetStatus + ".";
+            }
 
             Notification notification = Notification.builder()
                     .userId(candidate.getUserId())
@@ -484,6 +505,7 @@ public class FacilityJobManagementService {
                 .resumeFileName(resumeFileName)
                 .candidateDocuments(docDtos)
                 .status(app.getStatus())
+                .firstHireFeeWaived(app.isFirstHireFeeWaived())
                 .matchScore(canonicalScore)
                 .appliedAt(app.getAppliedAt())
                 .interviewScheduledAt(app.getInterviewScheduledAt())

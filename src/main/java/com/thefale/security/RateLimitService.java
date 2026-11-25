@@ -14,6 +14,7 @@ public class RateLimitService {
 
     private final Map<String, Bucket> otpSendBuckets = new ConcurrentHashMap<>();
     private final Map<String, Bucket> otpVerifyBuckets = new ConcurrentHashMap<>();
+    private final Map<String, Bucket> facilityPasswordBuckets = new ConcurrentHashMap<>();
     private final Map<String, Bucket> globalBuckets = new ConcurrentHashMap<>();
 
     public boolean tryConsumeOtpSend(String clientIp) {
@@ -26,6 +27,11 @@ public class RateLimitService {
         return bucket.tryConsume(1);
     }
 
+    public boolean tryConsumeFacilityPasswordLogin(String clientIp) {
+        Bucket bucket = facilityPasswordBuckets.computeIfAbsent(clientIp, k -> createFacilityPasswordBucket());
+        return bucket.tryConsume(1);
+    }
+
     public boolean tryConsumeGlobal(String clientIp) {
         Bucket bucket = globalBuckets.computeIfAbsent(clientIp, k -> createGlobalBucket());
         return bucket.tryConsume(1);
@@ -34,6 +40,7 @@ public class RateLimitService {
     public void clear() {
         otpSendBuckets.clear();
         otpVerifyBuckets.clear();
+        facilityPasswordBuckets.clear();
         globalBuckets.clear();
     }
 
@@ -46,6 +53,13 @@ public class RateLimitService {
 
     private Bucket createOtpVerifyBucket() {
         // 5 verification attempts per 15 minutes
+        Refill refill = Refill.intervally(5, Duration.ofMinutes(15));
+        Bandwidth limit = Bandwidth.classic(5, refill);
+        return Bucket.builder().addLimit(limit).build();
+    }
+
+    private Bucket createFacilityPasswordBucket() {
+        // Five password attempts per 15 minutes per client IP.
         Refill refill = Refill.intervally(5, Duration.ofMinutes(15));
         Bandwidth limit = Bandwidth.classic(5, refill);
         return Bucket.builder().addLimit(limit).build();

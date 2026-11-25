@@ -3387,7 +3387,7 @@ components:
 
     FacilityOnboardingRequest:
       type: object
-      required: [contactPerson, hospitalName, type, city, state, beds, licenseNumber]
+      required: [contactPerson, hospitalName]
       properties:
         contactPerson:
           type: string
@@ -3397,7 +3397,7 @@ components:
           type: string
           minLength: 3
           maxLength: 150
-        type:
+        facilityType:
           type: string
           maxLength: 50
         city:
@@ -3406,9 +3406,12 @@ components:
         state:
           type: string
           maxLength: 50
+        area:
+          type: string
+          maxLength: 80
         beds:
           type: integer
-          minimum: 1
+          minimum: 0
           maximum: 5000
         licenseNumber:
           type: string
@@ -3426,6 +3429,8 @@ components:
         hospitalName:
           type: string
         facilityType:
+          type: string
+        area:
           type: string
         city:
           type: string

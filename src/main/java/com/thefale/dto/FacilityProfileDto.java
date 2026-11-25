@@ -22,6 +22,7 @@ public class FacilityProfileDto {
     private String size;
     private String about;
     private String website;
+    private String area;
     private String city;
     private String state;
     private String pincode;
@@ -50,4 +51,5 @@ public class FacilityProfileDto {
     private java.util.List<FacilityDocumentDto> documents;
     private Instant verifiedAt;
     private Instant createdAt;
+    private boolean firstHireFreeAvailable;
 }

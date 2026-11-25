@@ -32,6 +32,10 @@ public class JobApplication {
     private String status = "PENDING_SCREENING"; // PENDING_SCREENING, SHORTLISTED, INTERVIEW, OFFERED, HIRED, REJECTED, WITHDRAWN
 
     @Builder.Default
+    @Column(name = "first_hire_fee_waived", nullable = false)
+    private boolean firstHireFeeWaived = false;
+
+    @Builder.Default
     @Column(name = "match_score", nullable = false)
     private int matchScore = 75;
 
